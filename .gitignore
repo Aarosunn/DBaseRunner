@@ -14,3 +14,5 @@ figures/*.pdf
 !figures/.gitkeep
 *.log
 .env
+.venv/
+.pytest_cache/
