@@ -15,6 +15,7 @@ dependencies = [
 dev = [
     "pytest>=8",
     "ruff>=0.6",
+    "matplotlib>=3.8",   # plot.py: figures from results/ CSVs
 ]
 
 [tool.uv]

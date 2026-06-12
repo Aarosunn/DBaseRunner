@@ -31,7 +31,9 @@ class JacBackend(BackendBase):
     def health(self) -> bool:
         # jac-cloud exposes walker:pub health as POST /walker/health, not GET.
         try:
-            resp = self.session.post(f"{self.base_url}/walker/health", json={}, timeout=5)
+            resp = self.session.post(
+                f"{self.base_url}/walker/health", json={}, timeout=5
+            )
             return resp.status_code == 200
         except requests.RequestException:
             return False
@@ -39,7 +41,9 @@ class JacBackend(BackendBase):
     def reset(self) -> None:
         # Jac has no data-delete endpoint; namespacing is the correctness mechanism
         # (harness-fix-spec §1.2). Logged no-op — never raise.
-        print("  [jac] reset(): no server-side data wipe; relying on eval-user namespacing")
+        print(
+            "  [jac] reset(): no server-side data wipe; relying on eval-user namespacing"
+        )
 
     def clear_cache(self) -> None:
         resp = self.session.post(f"{self.base_url}/walker/clear_cache", json={})
