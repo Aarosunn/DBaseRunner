@@ -1,0 +1,18 @@
+{
+  "run_id": "20260612105258",
+  "backend": "postgres",
+  "harness_git_sha": "989202138af67918f84bbba59206b27b76a8a19e",
+  "seed_spec_version": 1,
+  "likes_threshold": 10,
+  "warmup": 2,
+  "trials": 2,
+  "sweeps": [
+    "fanout"
+  ],
+  "cold_l1": false,
+  "started_at": "2026-06-12T14:52:58Z",
+  "finished_at": "2026-06-12T14:53:00Z",
+  "notes": {
+    "jac_topology_index": "from k8s env JAC_TOPOLOGY_INDEX, record actual value"
+  }
+}

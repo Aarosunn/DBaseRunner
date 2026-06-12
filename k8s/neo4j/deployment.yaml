@@ -54,7 +54,7 @@ spec:
     spec:
       containers:
         - name: neo4j-app
-          image: dbaserunner/neo4j-app:latest
+          image: dbaserunner/neo4j-app:v1
           imagePullPolicy: Never
           ports:
             - containerPort: 8000

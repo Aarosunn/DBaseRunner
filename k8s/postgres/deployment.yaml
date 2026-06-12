@@ -53,7 +53,7 @@ spec:
     spec:
       containers:
         - name: postgres-app
-          image: dbaserunner/postgres-app:latest
+          image: dbaserunner/postgres-app:v3
           imagePullPolicy: Never
           ports:
             - containerPort: 8000
