@@ -106,12 +106,26 @@ ConfigMap step is per-backend, so deploying one backend never touches another.
 > 3. **Confirm the pod is on the new tag** before trusting it:
 >    `kubectl get pod -o jsonpath='{.items[*].spec.containers[0].image}{"\n"}' | grep postgres-app`
 
-> **⚠ jac deploy is unverified.** `k8s/jac/deployment.yaml` runs `jac start --scale` *inside* a
-> pod. jac-cloud's `--scale` mode normally self-deploys to k8s (that's what `servers/jac/deploy.sh`
-> does natively → service `jaseci-service`). Whether the in-pod manifest works, or whether you
-> must use the native `servers/jac/deploy.sh` path instead (and point the harness at
-> `svc/jaseci-service`), is the one deploy question only a live cluster can settle. `deploy.sh`
-> is kept as the fallback.
+> **⚠ jac: deploy NATIVELY, not via `k8s/jac/`.** The in-pod manifest is broken (its
+> `python:3.12-slim` initContainer mounts an emptyDir over site-packages → no pip; no git;
+> the `jac` binary isn't shared with the main container). **Use jac-cloud's own deploy:**
+> ```bash
+> cd servers/jac && ./deploy.sh          # jac start main.jac --scale on the host
+> ```
+> jac-cloud self-deploys its full stack to k8s (app + mongodb + redis + ingress + monitoring),
+> exposed as `svc/jaseci-service`. Point the harness at it via `port-forward svc/jaseci-service 8080:8000`.
+>
+> Two known quirks on minikube:
+> - deploy.sh's ingress self-check (`localhost:30080`) fails → it prints **"Deployment failed:
+>   Timeout"** and spawns a useless host dev server on :8000/8001/8002. **False alarm** — the
+>   k8s pods are fine; use `svc/jaseci-service` on 8080. Kill the stray host servers with
+>   `pkill -9 -f "jac start"` (they squat `LOCAL_PORT` and break orchestrate's health check).
+> - **Open bug:** jac users are not root-isolated (a fresh user's `load_own_tweets` returns a
+>   prior user's tweets), which breaks the per-user namespacing. See [Known gaps](#known-gaps).
+>
+> A `walker:pub` must be listed in `main.jac`'s `import from server { ... }` to be served
+> (defining it in `server.jac` alone returns 405). jac-cloud auth wants `{username, password}`
+> (not email); use `inspect_schema.py <url>` to dump any backend's auth fields.
 
 ### 3.2 Start from a fresh schema
 
@@ -146,14 +160,28 @@ uv run python harness.py --backend postgres --url http://localhost:8001 \
 > Sanity-check the result CSV: `response_bytes` should grow with `param_value` on the fanout
 > sweep (more tweets seeded → bigger payload). Flat or zero bytes means the seed did not land.
 
-All four, automated (apply → wait → port-forward → harness → teardown per backend):
+Automated per backend (apply → wait → port-forward → harness → teardown):
 ```bash
-./orchestrate.sh --run-id run01                  # all backends, default sweeps
-./orchestrate.sh --backend jac                   # one backend
-./orchestrate.sh --keep -- --sweep fanout        # keep pods up; pass --sweep to harness
+./orchestrate.sh --backend postgres --run-id run01   # one backend
+./orchestrate.sh --keep -- --sweep fanout            # keep pods up; pass --sweep to harness
 ```
-`orchestrate.sh` generates one `run_id` and passes it to every backend. Env knobs:
-`NAMESPACE`, `LOCAL_PORT`, `ROLLOUT_TIMEOUT`, `HEALTH_RETRIES`.
+
+**The three relational/graph backends, full run** (jac deploys separately, see 3.1):
+```bash
+# kill any stray host jac dev servers first — they squat LOCAL_PORT and 404 the health check
+pkill -9 -f "jac start"; pkill -f "port-forward"; sleep 1
+for b in postgres sqlalchemy neo4j; do
+  LOCAL_PORT=8001 ./orchestrate.sh --backend "$b" --run-id run01
+done
+```
+Uses default 20 warmup / 30 trials and both sweeps (fanout + selectivity). If 8001 is still
+held, use `LOCAL_PORT=8090`. Don't use `--keep` across the loop — it leaves the port-forward
+up and the next backend collides on `LOCAL_PORT`.
+
+`orchestrate.sh` does NOT deploy jac correctly (its order puts jac first and the manifest is
+broken) — run jac on its own via `servers/jac/deploy.sh` (3.1), then `harness.py --backend jac
+--url http://localhost:8080 --run-id run01`. Env knobs: `NAMESPACE`, `LOCAL_PORT`,
+`ROLLOUT_TIMEOUT`, `HEALTH_RETRIES`.
 
 > **Phase 5 requires the SAME `--run-id` across all four backend runs** so the seeded
 > usernames/data line up for cross-system comparison. `orchestrate.sh` enforces this; if you
@@ -191,7 +219,8 @@ can never be mistaken for the headline figures. Don't use it for headline runs.
 |---|---|
 | **Phase 4.5 — 2-hop `load_feed`** (the paper's actual Fig 5/6 workload: fan-out = followees) | **not built.** Current harness is single-hop `load_own_tweets` → expect parity, not the paper's separation. |
 | **Phase 5 — cross-backend correctness** (compare result sets across backends) | not built. `verify_seed` checks each backend against its own spec, not against the others. |
-| **Live verification** | nothing has run on a cluster. All code is correct-by-construction + unit-tested. First run must confirm: jac `:pub seed_tweets` + JWT binds the caller's root; detached liker Profiles persist; per-point `verify_seed` passes; jac-cloud accepts non-email usernames. |
+| **Live verification (2026-06-12)** | postgres / neo4j / sqlalchemy ran on clarity minikube and validate (`response_bytes` scales with fanout). jac deployed + auth + seed working after a fix chain (see below). |
+| **jac root isolation — OPEN BUG** | A freshly-registered jac user's `load_own_tweets` returns a *previous* user's tweets: jac-cloud isn't isolating users by root in `--scale` mode. This breaks the per-user namespacing (fresh user per param point) on jac. Walkers look correctly scoped (`[-->(?:Profile)-->(?:Tweet)]` from `here`); suspect the `grant(..., ConnectPerm)` in `seed_tweets` or shared-root behavior. Needs jac-cloud-side investigation before jac data is valid. |
 
 ## Tests at a glance
 
