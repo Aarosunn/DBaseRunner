@@ -236,6 +236,7 @@ def test_load_own_tweets_deserializes_json_string_comments():
             "content": "hello",
             "author_username": "testuser",
             "created_at": "2024-01-01T00:00:00",
+            "like_count": 11,
             "likes": [],
             "comments": [comment_str],
         }

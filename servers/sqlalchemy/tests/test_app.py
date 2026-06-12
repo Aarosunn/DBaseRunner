@@ -113,20 +113,29 @@ def test_load_own_tweets_empty(client, registered_user):
     assert isinstance(r["ms_traversal"], float)
     assert isinstance(r["ms_build_payload"], float)
 
-def test_load_own_tweets_with_data(client, registered_user):
+def test_load_own_tweets_applies_like_count_predicate(client, registered_user):
+    # load_own_tweets now applies the benchmark predicate like_count > 10 server-side
+    # (seed-design-spec §2). Seed one matching tweet and one below threshold; only the
+    # matching one must come back, carrying like_count in the payload.
     auth = {"Authorization": f"Bearer {registered_user['username']}"}
-    # Create a tweet
-    client.post("/walker/create_tweet", json={"content": "hello world"}, headers=auth)
-    # Load own tweets
+    client.post("/walker/seed_tweets", json={
+        "author_username": "testuser",
+        "likers": ["liker_0", "liker_1"],
+        "tweets": [
+            {"content": "[t_0000] matching", "created_at": "2026-01-01T00:00:00Z",
+             "like_count": 14, "likers": ["liker_0", "liker_1"],
+             "comments": [{"author": "liker_0", "content": "nice",
+                           "created_at": "2026-01-01T00:00:30Z"}]},
+            {"content": "[t_0001] below threshold", "created_at": "2026-01-01T00:01:00Z",
+             "like_count": 3, "likers": ["liker_0"], "comments": []},
+        ],
+    })
     resp = client.post("/walker/load_own_tweets", headers=auth)
     assert resp.status_code == 200
-    body = resp.json()
-    tweets = body["data"]["result"]
-    assert len(tweets) == 1
+    tweets = resp.json()["data"]["result"]
+    assert len(tweets) == 1                       # below-threshold tweet filtered out
     t = tweets[0]
-    assert t["content"] == "hello world"
-    assert "id" in t
-    assert "author_username" in t
-    assert "created_at" in t
-    assert "likes" in t
-    assert "comments" in t
+    assert t["content"] == "[t_0000] matching"
+    assert t["like_count"] == 14
+    for key in ("id", "author_username", "created_at", "likes", "comments"):
+        assert key in t
