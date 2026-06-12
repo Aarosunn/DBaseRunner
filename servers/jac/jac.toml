@@ -1,0 +1,20 @@
+[project]
+name = "little-x"
+version = "1.0.0"
+description = "Little X - A Twitter-like social app built with Jac"
+entry-point = "main.jac"
+
+[jacpack]
+name = "little-x"
+description = "Little X social app template"
+
+[dependencies]
+numpy = ">=1.24.0"
+scikit-learn = "~=1.8"
+
+[run]
+topology_index = true
+
+[plugins.scale.kubernetes]
+jaseci_repo_url = "https://github.com/cse584-W26/jaseci.git"
+jaseci_branch = "filter_pushdown"
