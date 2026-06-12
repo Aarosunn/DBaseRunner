@@ -185,3 +185,70 @@ def test_import_data_registered_at_function_prefix():
     with TestClient(app) as client:
         resp = client.post("/function/import_data", json={"data": {}})
     assert resp.status_code == 200
+
+
+# ---------------------------------------------------------------------------
+# add_comment: comment must be stored as a JSON string, not a Python dict.
+# Neo4j cannot store list-of-maps as node properties — each comment must be
+# json.dumps()'d before being passed to Cypher.
+# ---------------------------------------------------------------------------
+
+def test_add_comment_stores_comment_as_json_string():
+    import json
+    _mock_session.run.return_value.single.return_value = MagicMock()  # tweet found
+    with TestClient(app) as client:
+        client.post(
+            "/walker/add_comment",
+            json={"tweet_id": "t1", "content": "hello"},
+            headers=_auth("alice"),
+        )
+    # Find the run() call that has a 'comment' kwarg
+    stored = None
+    for call in _mock_session.run.call_args_list:
+        _, kwargs = call
+        if "comment" in kwargs:
+            stored = kwargs["comment"]
+            break
+    assert stored is not None, "No run() call passed 'comment' kwarg"
+    assert isinstance(stored, str), (
+        f"comment must be JSON string for Neo4j compat, got {type(stored).__name__}: {stored!r}"
+    )
+    parsed = json.loads(stored)
+    assert parsed["username"] == "alice"
+    assert parsed["content"] == "hello"
+    assert "created_at" in parsed
+
+
+# ---------------------------------------------------------------------------
+# load_own_tweets: comments returned from Neo4j may be JSON strings
+# (written by add_comment). They must be deserialized to dicts before
+# being included in the response.
+# ---------------------------------------------------------------------------
+
+def test_load_own_tweets_deserializes_json_string_comments():
+    import json
+    comment_str = json.dumps(
+        {"username": "alice", "content": "great post", "created_at": "2024-01-01T00:00:00"}
+    )
+    _mock_session.run.return_value.data.return_value = [
+        {
+            "id": "t1",
+            "content": "hello",
+            "author_username": "testuser",
+            "created_at": "2024-01-01T00:00:00",
+            "likes": [],
+            "comments": [comment_str],
+        }
+    ]
+    with TestClient(app) as client:
+        resp = client.post("/walker/load_own_tweets", headers=_auth())
+    assert resp.status_code == 200
+    tweets = resp.json()["data"]["result"]
+    assert len(tweets) == 1
+    comments = tweets[0]["comments"]
+    assert len(comments) == 1
+    assert isinstance(comments[0], dict), (
+        f"comment should be dict after deserialization, got {type(comments[0]).__name__}"
+    )
+    assert comments[0]["username"] == "alice"
+    assert comments[0]["content"] == "great post"

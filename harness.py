@@ -140,7 +140,6 @@ def main(argv=None):
     args = _build_parser().parse_args(argv)
 
     from backends import JacBackend, PostgresBackend, SQLAlchemyBackend, Neo4jBackend
-    import requests
 
     backend_classes = {
         "jac":        JacBackend,
@@ -155,7 +154,10 @@ def main(argv=None):
     out_dir.mkdir(parents=True, exist_ok=True)
     out_path = out_dir / f"{args.backend}.csv"
 
-    session = requests.Session()
+    # Reuse the adapter's authenticated session — it carries the Bearer token
+    # set in backend.auth(). A fresh requests.Session() would be unauthenticated
+    # and every timed call would 401.
+    session = backend._session
     load_url = f"{args.url.rstrip('/')}/walker/load_own_tweets"
 
     clear_fn = None

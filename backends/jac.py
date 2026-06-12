@@ -25,11 +25,31 @@ class JacBackend(BackendBase):
             json={"user_id": user_id, "limit": limit, "selectivity": selectivity},
         )
         resp.raise_for_status()
-        return resp.json()
+        return self._normalize(resp.json())
+
+    @staticmethod
+    def _normalize(body: dict) -> dict:
+        """Normalize jac-cloud's walker envelope to the common backend shape.
+
+        jac-cloud serves walkers as POST /walker/<name> and wraps `report`
+        values as {"status": 200, "reports": [<report>...]}, with no "data"
+        or "result" wrapper. The baselines return
+        {"data": {"result": [...tweets], "reports": [{...}]}}. Map jac-cloud
+        onto that shape so the harness/correctness check sees one format.
+        """
+        if "data" in body:  # already common shape
+            return body
+        reports = body.get("reports") or []
+        report = reports[0] if reports and isinstance(reports[0], dict) else {}
+        tweets = report.get("tweets", [])
+        return {"data": {"result": tweets, "reports": reports}}
 
     def health(self) -> bool:
+        # jac-cloud exposes walker:pub health as POST /walker/health, not GET.
         try:
-            resp = self._session.get(f"{self.base_url}/health", timeout=5)
+            resp = self._session.post(
+                f"{self.base_url}/walker/health", json={}, timeout=5
+            )
             return resp.status_code == 200
         except requests.RequestException:
             return False

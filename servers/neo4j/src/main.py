@@ -13,6 +13,7 @@ bench_own_tweets_selectivity.py works unchanged with
 --endpoint-prefix /walker --auth-scheme bearer-username.
 """
 
+import json
 import os
 import time
 import uuid
@@ -169,7 +170,10 @@ def load_own_tweets(request: Request):
             "author_username": r["author_username"],
             "created_at": r["created_at"],
             "likes": r["likes"] or [],
-            "comments": r["comments"] or [],
+            "comments": [
+                json.loads(c) if isinstance(c, str) else c
+                for c in (r["comments"] or [])
+            ],
         }
         for r in rows
     ]
@@ -256,7 +260,7 @@ def add_comment(body: AddComment, request: Request):
             RETURN t
             """,
             tweet_id=body.tweet_id,
-            comment=comment,
+            comment=json.dumps(comment),
         ).single()
     if result is None:
         raise HTTPException(status_code=404, detail="Tweet not found")
