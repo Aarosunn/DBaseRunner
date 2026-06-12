@@ -82,10 +82,11 @@ class BackendBase(ABC):
     def ensure_user(self, username: str, password: str) -> None:
         """Register username (tolerate already-exists), then log in. On success
         self.session carries the Authorization header."""
-        reg = self.session.post(f"{self.base_url}/user/register",
-                                json=self._register_body(username, password))
-        # Register-then-conflict is the normal idempotent path; ignore non-2xx here
-        # and let login be the authority on whether credentials work.
+        # Register-then-conflict is the normal idempotent path; we ignore the
+        # register response (non-2xx included) and let login be the authority on
+        # whether the credentials work.
+        self.session.post(f"{self.base_url}/user/register",
+                          json=self._register_body(username, password))
         self.auth(username, password)
 
     def auth(self, username: str, password: str) -> None:

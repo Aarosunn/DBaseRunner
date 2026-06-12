@@ -6,7 +6,6 @@ content keys, monotonic timestamps, comments, byte-determinism, self-checks.
 """
 
 import json
-import re
 
 import pytest
 

@@ -9,7 +9,6 @@ seed() body shape, reset(), clear_cache().
 import json
 from unittest.mock import MagicMock
 
-import pytest
 
 from backends import JacBackend, PostgresBackend, SQLAlchemyBackend, Neo4jBackend
 
