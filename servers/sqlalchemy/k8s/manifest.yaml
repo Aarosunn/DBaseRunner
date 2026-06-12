@@ -1,0 +1,252 @@
+# LittleX SQLAlchemy backend on Kubernetes — no-build variant.
+#
+# Deploys two pods into the same namespace where jac-scale runs:
+#
+#   1. Postgres 16 (StatefulSet) — durable per-pod storage via emptyDir
+#      (the bench reset_database wipes it anyway, so no PVC needed).
+#   2. Flask app (Deployment) using the stock python:3.12-slim image,
+#      with the Flask source code shipped via a ConfigMap and an
+#      initContainer that pip-installs the requirements at startup.
+#      No custom Docker image, no `docker build` step.
+#
+# Both have ClusterIP services so the bench host can reach them via
+#   kubectl port-forward svc/littlex-sqlalchemy 8080:8000
+# — exactly the same network shape that
+# littleX_FULLSTACK/deploy.sh uses for jac-scale and that
+# littleX-benchmarks/Neo4j/k8s/neo4j.yaml uses for Neo4j. That symmetry is
+# the whole point: every backend pays the same kubectl-port-forward + svc +
+# pod hops, so latency differences reflect the backend itself.
+#
+# The src ConfigMap is created by deploy_sqlalchemy_k8s.sh from the local
+# files (it does NOT live in this manifest because it would otherwise have
+# to embed the Python source inline, which is fragile to update).
+#
+# Apply with:   ./deploy_sqlalchemy_k8s.sh
+# Tear down:    ./teardown_sqlalchemy_k8s.sh
+---
+# ============================================================================
+# Postgres
+# ============================================================================
+apiVersion: v1
+kind: Service
+metadata:
+  name: littlex-postgres
+  labels:
+    app: littlex-sqlalchemy
+    component: postgres
+spec:
+  type: ClusterIP
+  selector:
+    app: littlex-sqlalchemy
+    component: postgres
+  ports:
+    - name: postgres
+      port: 5432
+      targetPort: 5432
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: littlex-postgres
+  labels:
+    app: littlex-sqlalchemy
+    component: postgres
+spec:
+  serviceName: littlex-postgres
+  replicas: 1
+  selector:
+    matchLabels:
+      app: littlex-sqlalchemy
+      component: postgres
+  template:
+    metadata:
+      labels:
+        app: littlex-sqlalchemy
+        component: postgres
+    spec:
+      # Same trick as the Neo4j manifest — disable Kubernetes service-link
+      # env vars so K8s does not auto-inject POSTGRES_PORT etc into this
+      # container, which would override Postgres' own POSTGRES_USER /
+      # POSTGRES_DB initialization vars.
+      enableServiceLinks: false
+      containers:
+        - name: postgres
+          image: postgres:16-alpine
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: POSTGRES_USER
+              value: postgres
+            - name: POSTGRES_PASSWORD
+              value: postgres
+            - name: POSTGRES_DB
+              value: littlex
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+          ports:
+            - name: postgres
+              containerPort: 5432
+          readinessProbe:
+            exec:
+              command: ["pg_isready", "-U", "postgres", "-d", "littlex"]
+            initialDelaySeconds: 5
+            periodSeconds: 3
+            failureThreshold: 30
+          livenessProbe:
+            exec:
+              command: ["pg_isready", "-U", "postgres", "-d", "littlex"]
+            initialDelaySeconds: 30
+            periodSeconds: 30
+          resources:
+            requests:
+              cpu: "250m"
+              memory: "512Mi"
+            limits:
+              cpu: "1000m"
+              memory: "1Gi"
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+      volumes:
+        - name: data
+          emptyDir: {}
+---
+# ============================================================================
+# Flask backend
+# ============================================================================
+apiVersion: v1
+kind: Service
+metadata:
+  name: littlex-sqlalchemy
+  labels:
+    app: littlex-sqlalchemy
+    component: flask
+spec:
+  type: ClusterIP
+  selector:
+    app: littlex-sqlalchemy
+    component: flask
+  ports:
+    - name: http
+      port: 8000
+      targetPort: 8000
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: littlex-sqlalchemy
+  labels:
+    app: littlex-sqlalchemy
+    component: flask
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: littlex-sqlalchemy
+      component: flask
+  template:
+    metadata:
+      labels:
+        app: littlex-sqlalchemy
+        component: flask
+    spec:
+      enableServiceLinks: false
+      # ----------------------------------------------------------------
+      # Init container: install Python deps once, into a shared emptyDir
+      # that the main container then re-uses on its PYTHONPATH. This
+      # avoids re-installing on every pod start (the deps live in the
+      # emptyDir for the lifetime of the pod) while keeping the manifest
+      # build-free — we use the stock python:3.12-slim image.
+      # ----------------------------------------------------------------
+      initContainers:
+        - name: pip-install
+          image: python:3.12-slim
+          imagePullPolicy: IfNotPresent
+          command:
+            - sh
+            - -c
+            - |
+              set -e
+              pip install --no-cache-dir --target=/deps -r /code/requirements.txt
+              echo "deps installed at /deps:"
+              ls /deps | head -20
+          volumeMounts:
+            - name: src
+              mountPath: /code
+            - name: deps
+              mountPath: /deps
+      containers:
+        - name: flask
+          image: python:3.12-slim
+          imagePullPolicy: IfNotPresent
+          command:
+            - sh
+            - -c
+            - |
+              set -e
+              # Make the pip-installed deps importable
+              export PYTHONPATH="/deps:/code"
+              # And put any executable scripts (flask CLI) on PATH
+              export PATH="/deps/bin:$PATH"
+              cd /code
+              exec python -m flask --app src run --host 0.0.0.0 --port 8000 --with-threads
+          env:
+            - name: DATABASE_URL
+              value: "postgresql+psycopg://postgres:postgres@littlex-postgres:5432/littlex"
+            - name: PYTHONUNBUFFERED
+              value: "1"
+            - name: FLASK_APP
+              value: src
+          ports:
+            - name: http
+              containerPort: 8000
+          readinessProbe:
+            # The LittleX Flask app has no GET endpoints (every walker is
+            # POST-only), so an httpGet probe always returns 405 and the
+            # pod never becomes Ready. A TCP-socket probe is the right
+            # equivalent here: it confirms Flask is bound to :8000 and
+            # accepting connections, which is the readiness signal we
+            # actually need for the bench client.
+            tcpSocket:
+              port: 8000
+            initialDelaySeconds: 10
+            periodSeconds: 3
+            failureThreshold: 40
+          livenessProbe:
+            tcpSocket:
+              port: 8000
+            initialDelaySeconds: 60
+            periodSeconds: 30
+          resources:
+            requests:
+              cpu: "250m"
+              memory: "256Mi"
+            limits:
+              cpu: "1000m"
+              memory: "1Gi"
+          volumeMounts:
+            - name: src
+              mountPath: /code
+            - name: deps
+              mountPath: /deps
+      volumes:
+        # The src ConfigMap is populated by deploy_sqlalchemy_k8s.sh from the
+        # files in this repo — see that script for the list. Subpaths in the
+        # mount path tree below get auto-created by Kubernetes.
+        - name: src
+          configMap:
+            name: littlex-sqlalchemy-src
+            items:
+              - key: requirements.txt
+                path: requirements.txt
+              - key: src__init__.py
+                path: src/__init__.py
+              - key: src_models.py
+                path: src/models.py
+              - key: src_routes_user.py
+                path: src/routes/user.py
+              - key: src_routes_walker.py
+                path: src/routes/walker.py
+        - name: deps
+          emptyDir: {}

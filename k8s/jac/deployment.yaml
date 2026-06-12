@@ -1,0 +1,155 @@
+# Deployment model: no-build pattern
+#
+# jac-scale (the Jaseci graph runtime) is NOT available on Docker Hub, so we
+# cannot pre-build a server image the way postgres/neo4j do.  Instead we:
+#
+#   1. Mount the Jac source files via a ConfigMap.
+#   2. Use an initContainer (stock python:3.12-slim) to pip-install jac-cloud
+#      from the custom Jaseci fork defined in jac.toml:
+#        [plugins.scale.kubernetes]
+#        jaseci_repo_url = "https://github.com/cse584-W26/jaseci.git"
+#        jaseci_branch   = "filter_pushdown"
+#   3. The main container runs the same python:3.12-slim image and starts the
+#      server with: jac start main.jac --no-dev --no_client --scale --experimental
+#      (matching the command used in littleX/littleX_FULLSTACK/deploy.sh).
+#
+# Liveness/readiness probes use tcpSocket because jac walkers are POST-only;
+# there is no unauthenticated GET endpoint suitable for an HTTP probe.
+#
+# Scaling beyond 1 replica requires a shared Redis L2 cache and a shared
+# backing store (jac-scale default: sqlite, swap to postgres for HA).
+
+---
+# --- Source ConfigMap ---------------------------------------------------
+# Populate with: kubectl create configmap dbaserunner-jac-src \
+#   --from-file=DBaseRunner/servers/jac/ --dry-run=client -o yaml
+# (or apply the files individually; shown here as a placeholder)
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: dbaserunner-jac-src
+  labels:
+    app: dbaserunner-jac
+# data: populated by kustomize / CI from DBaseRunner/servers/jac/
+# Uncomment and fill in for a one-shot apply:
+# data:
+#   main.jac: |
+#     ...
+#   server.jac: |
+#     ...
+#   jac.toml: |
+#     ...
+
+---
+# --- Deployment ---------------------------------------------------------
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: dbaserunner-jac
+  labels:
+    app: dbaserunner-jac
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: dbaserunner-jac
+  template:
+    metadata:
+      labels:
+        app: dbaserunner-jac
+    spec:
+      # ----------------------------------------------------------------
+      # initContainer: install jac-cloud from the filter_pushdown branch
+      # ----------------------------------------------------------------
+      initContainers:
+        - name: install-jac
+          image: python:3.12-slim
+          command:
+            - sh
+            - -c
+            - |
+              pip install --quiet \
+                "git+https://github.com/cse584-W26/jaseci.git@filter_pushdown#subdirectory=jac-cloud" \
+                numpy>=1.24.0 "scikit-learn~=1.8" && \
+              cp -r /src/* /app/
+          volumeMounts:
+            - name: src
+              mountPath: /src
+              readOnly: true
+            - name: app
+              mountPath: /app
+            - name: site-packages
+              mountPath: /usr/local/lib/python3.12/site-packages
+
+      # ----------------------------------------------------------------
+      # main container: run jac-scale server
+      # ----------------------------------------------------------------
+      containers:
+        - name: dbaserunner-jac
+          image: python:3.12-slim
+          workingDir: /app
+          command:
+            - jac
+            - start
+            - main.jac
+            - --no-dev
+            - --no_client
+            - --scale
+            - --experimental
+          ports:
+            - name: http
+              containerPort: 8000
+          env:
+            - name: JAC_TOPOLOGY_INDEX
+              value: "true"
+          # tcpSocket probes: walkers are POST-only, no unauthenticated GET endpoint
+          livenessProbe:
+            tcpSocket:
+              port: 8000
+            initialDelaySeconds: 30
+            periodSeconds: 15
+            failureThreshold: 4
+          readinessProbe:
+            tcpSocket:
+              port: 8000
+            initialDelaySeconds: 20
+            periodSeconds: 10
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: "500m"
+              memory: "512Mi"
+            limits:
+              cpu: "2"
+              memory: "2Gi"
+          volumeMounts:
+            - name: app
+              mountPath: /app
+            - name: site-packages
+              mountPath: /usr/local/lib/python3.12/site-packages
+
+      volumes:
+        - name: src
+          configMap:
+            name: dbaserunner-jac-src
+        - name: app
+          emptyDir: {}
+        - name: site-packages
+          emptyDir: {}
+
+---
+# --- Service ------------------------------------------------------------
+apiVersion: v1
+kind: Service
+metadata:
+  name: dbaserunner-jac
+  labels:
+    app: dbaserunner-jac
+spec:
+  type: ClusterIP
+  selector:
+    app: dbaserunner-jac
+  ports:
+    - name: http
+      port: 8000
+      targetPort: 8000

@@ -871,6 +871,49 @@ walker bench_pushdown {
     }
 }
 
+walker:pub health {
+    can run with Root entry {
+        report {"status": "ok"};
+    }
+}
+
+walker:pub load_own_tweets {
+    can run with Root entry {
+        import from time { perf_counter }
+
+        my_profiles = [-->(?:Profile)];
+        if not my_profiles {
+            report {"error": "No profile"};
+            disengage;
+        }
+        my_profile = my_profiles[0];
+
+        t0 = perf_counter();
+        tweet_data: list = [];
+        for tweet in [my_profile-->(?:Tweet)] {
+            likers = [tweet<-:Like:<-(?:Profile)];
+            tweet_data.append({
+                "id": tweet.jac_id,
+                "content": tweet.content,
+                "author_username": tweet.author_username,
+                "created_at": tweet.created_at,
+                "likes": [p.username for p in likers],
+                "comments": tweet.comments
+            });
+        }
+        ms_traversal = round((perf_counter() - t0) * 1000, 4);
+
+        t1 = perf_counter();
+        ms_build_payload = round((perf_counter() - t1) * 1000, 4);
+
+        report {
+            "tweets": tweet_data,
+            "ms_traversal": ms_traversal,
+            "ms_build_payload": ms_build_payload
+        };
+    }
+}
+
 walker:pub clear_cache {
     can run with Root entry {
         import from jaclang { JacRuntimeInterface as Jac }

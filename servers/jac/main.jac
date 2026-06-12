@@ -1,4 +1,4 @@
-"""Little X - Entry point combining backend and frontend."""
+"""Little X - Backend entry point for DBaseRunner benchmark server."""
 
 
 import from server {
@@ -22,14 +22,7 @@ import from server {
         import_data,
         clear_cache,
         bench_feed,
-        bench_single_hop
+        bench_single_hop,
+        load_own_tweets,
+        health
     }
-
-
-cl {
-    import from .frontend { app as ClientApp }
-
-    def:pub app() -> Any {
-        return <ClientApp />;
-    }
-}

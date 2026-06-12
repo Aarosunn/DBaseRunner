@@ -1,0 +1,234 @@
+# DBaseRunner SQLAlchemy backend on Kubernetes — no-build variant.
+#
+# Deploys two pods:
+#   1. Postgres 16 (StatefulSet) — emptyDir storage (bench reset_database wipes
+#      it anyway, so no PVC needed).
+#   2. FastAPI app (Deployment) using stock python:3.12-slim, source shipped via
+#      a ConfigMap, deps pip-installed by an initContainer at pod startup.
+#
+# Both get ClusterIP services; reach the app via:
+#   kubectl port-forward svc/dbaserunner-sqlalchemy 8080:8000
+#
+# The src ConfigMap is populated by the deploy script from local files.
+#
+# App entry point: python -m uvicorn src:app --host 0.0.0.0 --port 8000
+# (FastAPI app object is at src/__init__.py:app)
+#
+# Now has a real GET /health endpoint, so both probes use httpGet instead of
+# the tcpSocket fallback that the old Flask manifest needed.
+---
+# ============================================================================
+# Postgres
+# ============================================================================
+apiVersion: v1
+kind: Service
+metadata:
+  name: dbaserunner-postgres
+  labels:
+    app: dbaserunner-sqlalchemy
+    component: postgres
+spec:
+  type: ClusterIP
+  selector:
+    app: dbaserunner-sqlalchemy
+    component: postgres
+  ports:
+    - name: postgres
+      port: 5432
+      targetPort: 5432
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: dbaserunner-postgres
+  labels:
+    app: dbaserunner-sqlalchemy
+    component: postgres
+spec:
+  serviceName: dbaserunner-postgres
+  replicas: 1
+  selector:
+    matchLabels:
+      app: dbaserunner-sqlalchemy
+      component: postgres
+  template:
+    metadata:
+      labels:
+        app: dbaserunner-sqlalchemy
+        component: postgres
+    spec:
+      # Disable service-link env vars so K8s does not auto-inject POSTGRES_PORT
+      # etc. into this container, which would override Postgres' own init vars.
+      enableServiceLinks: false
+      containers:
+        - name: postgres
+          image: postgres:16-alpine
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: POSTGRES_USER
+              value: postgres
+            - name: POSTGRES_PASSWORD
+              value: postgres
+            - name: POSTGRES_DB
+              value: dbaserunner
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+          ports:
+            - name: postgres
+              containerPort: 5432
+          readinessProbe:
+            exec:
+              command: ["pg_isready", "-U", "postgres", "-d", "dbaserunner"]
+            initialDelaySeconds: 5
+            periodSeconds: 3
+            failureThreshold: 30
+          livenessProbe:
+            exec:
+              command: ["pg_isready", "-U", "postgres", "-d", "dbaserunner"]
+            initialDelaySeconds: 30
+            periodSeconds: 30
+          resources:
+            requests:
+              cpu: "250m"
+              memory: "512Mi"
+            limits:
+              cpu: "1000m"
+              memory: "1Gi"
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+      volumes:
+        - name: data
+          emptyDir: {}
+---
+# ============================================================================
+# FastAPI backend
+# ============================================================================
+apiVersion: v1
+kind: Service
+metadata:
+  name: dbaserunner-sqlalchemy
+  labels:
+    app: dbaserunner-sqlalchemy
+    component: fastapi
+spec:
+  type: ClusterIP
+  selector:
+    app: dbaserunner-sqlalchemy
+    component: fastapi
+  ports:
+    - name: http
+      port: 8000
+      targetPort: 8000
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: dbaserunner-sqlalchemy
+  labels:
+    app: dbaserunner-sqlalchemy
+    component: fastapi
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: dbaserunner-sqlalchemy
+      component: fastapi
+  template:
+    metadata:
+      labels:
+        app: dbaserunner-sqlalchemy
+        component: fastapi
+    spec:
+      enableServiceLinks: false
+      # ----------------------------------------------------------------
+      # Init container: pip-install deps into a shared emptyDir that the
+      # main container mounts on its PYTHONPATH. Avoids re-installing on
+      # every pod start while keeping the manifest build-free.
+      # ----------------------------------------------------------------
+      initContainers:
+        - name: pip-install
+          image: python:3.12-slim
+          imagePullPolicy: IfNotPresent
+          command:
+            - sh
+            - -c
+            - |
+              set -e
+              pip install --no-cache-dir --target=/deps -r /code/requirements.txt
+              echo "deps installed at /deps:"
+              ls /deps | head -20
+          volumeMounts:
+            - name: src
+              mountPath: /code
+            - name: deps
+              mountPath: /deps
+      containers:
+        - name: fastapi
+          image: python:3.12-slim
+          imagePullPolicy: IfNotPresent
+          command:
+            - sh
+            - -c
+            - |
+              set -e
+              export PYTHONPATH="/deps:/code"
+              export PATH="/deps/bin:$PATH"
+              cd /code
+              exec python -m uvicorn src:app --host 0.0.0.0 --port 8000
+          env:
+            - name: DATABASE_URL
+              # psycopg2-binary driver; matches requirements.txt (no psycopg3).
+              value: "postgresql+psycopg2://postgres:postgres@dbaserunner-postgres:5432/dbaserunner"
+            - name: PYTHONUNBUFFERED
+              value: "1"
+          ports:
+            - name: http
+              containerPort: 8000
+          readinessProbe:
+            # GET /health returns {"status":"ok"} — a real HTTP probe is now
+            # possible, unlike the old Flask app which had POST-only endpoints.
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 10
+            periodSeconds: 3
+            failureThreshold: 40
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 60
+            periodSeconds: 30
+          resources:
+            requests:
+              cpu: "250m"
+              memory: "256Mi"
+            limits:
+              cpu: "1000m"
+              memory: "1Gi"
+          volumeMounts:
+            - name: src
+              mountPath: /code
+            - name: deps
+              mountPath: /deps
+      volumes:
+        # The src ConfigMap is populated by the deploy script from repo files.
+        - name: src
+          configMap:
+            name: dbaserunner-sqlalchemy-src
+            items:
+              - key: requirements.txt
+                path: requirements.txt
+              - key: src__init__.py
+                path: src/__init__.py
+              - key: src_models.py
+                path: src/models.py
+              - key: src_routes_user.py
+                path: src/routes/user.py
+              - key: src_routes_walker.py
+                path: src/routes/walker.py
+        - name: deps
+          emptyDir: {}

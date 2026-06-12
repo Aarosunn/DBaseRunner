@@ -1,0 +1,19 @@
+[project]
+name = "dbaserunner-sqlalchemy"
+version = "0.1.0"
+description = "DBaseRunner SQLAlchemy benchmark backend (FastAPI)"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "fastapi>=0.115.12",
+    "uvicorn[standard]>=0.34.3",
+    "sqlalchemy>=2.0.48",
+    "psycopg2-binary>=2.9.10",
+]
+
+[project.optional-dependencies]
+test = [
+    "pytest>=8.3.5",
+    "httpx>=0.28.1",
+    "starlette>=0.46.2",
+]
