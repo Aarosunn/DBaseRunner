@@ -73,15 +73,30 @@ reach the cluster until you rebuild the images / regenerate the ConfigMaps below
 
 ### 3.1 Get each backend's code onto the cluster
 
+All backends use the uniform `dbaserunner-*` k8s manifests under `k8s/<backend>/`. Two ship
+code as a prebuilt image; two (no-build) ship it via a source ConfigMap populated from the
+current repo files by `./k8s-configmap.sh <backend>`.
+
 | Backend | How code is delivered | Update command (after editing server code) |
 |---|---|---|
 | **postgres** | prebuilt image `dbaserunner/postgres-app:latest` | `docker build -t dbaserunner/postgres-app:latest servers/postgres && docker push dbaserunner/postgres-app:latest` |
 | **neo4j** | prebuilt image `dbaserunner/neo4j-app:latest` | `docker build -t dbaserunner/neo4j-app:latest servers/neo4j && docker push dbaserunner/neo4j-app:latest` |
-| **jac** | `dbaserunner-jac-src` **ConfigMap** (mounts `server.jac`) | `bash servers/jac/deploy.sh` (recreates the src ConfigMap from local files) |
-| **sqlalchemy** | `dbaserunner-sqlalchemy-src` **ConfigMap** | `bash servers/sqlalchemy/deploy_sqlalchemy_k8s.sh` (recreates the src ConfigMap) |
+| **jac** | `dbaserunner-jac-src` **ConfigMap** (main.jac + server.jac + jac.toml) | `./k8s-configmap.sh jac` |
+| **sqlalchemy** | `dbaserunner-sqlalchemy-src` **ConfigMap** | `./k8s-configmap.sh sqlalchemy` |
+
+`orchestrate.sh` runs `k8s-configmap.sh` automatically for jac/sqlalchemy before `apply`. The
+ConfigMap step is per-backend, so deploying one backend never touches another.
 
 > The Phase-4 changes (`like_count`, `seed_tweets`, the `like_count > 10` predicate) are in
-> these files — they are NOT in the running pods until you rebuild/regen.
+> these files — they are NOT in the running pods until you rebuild the image / re-run
+> `k8s-configmap.sh`.
+
+> **⚠ jac deploy is unverified.** `k8s/jac/deployment.yaml` runs `jac start --scale` *inside* a
+> pod. jac-cloud's `--scale` mode normally self-deploys to k8s (that's what `servers/jac/deploy.sh`
+> does natively → service `jaseci-service`). Whether the in-pod manifest works, or whether you
+> must use the native `servers/jac/deploy.sh` path instead (and point the harness at
+> `svc/jaseci-service`), is the one deploy question only a live cluster can settle. `deploy.sh`
+> is kept as the fallback.
 
 ### 3.2 Start from a fresh schema
 

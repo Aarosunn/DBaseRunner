@@ -79,6 +79,13 @@ for b in "${BACKENDS[@]}"; do
   echo ""
   echo "════════════════ ${b} ════════════════"
 
+  # No-build backends (jac, sqlalchemy) ship source via a ConfigMap populated
+  # from the CURRENT repo files; image-based backends (postgres, neo4j) no-op.
+  if [[ "$b" == "jac" || "$b" == "sqlalchemy" ]]; then
+    echo "  [1/5] populate src ConfigMap from current source"
+    NAMESPACE="$NAMESPACE" ./k8s-configmap.sh "$b"
+  fi
+
   echo "  [1/5] kubectl apply -f k8s/${b}/"
   kubectl apply -n "$NAMESPACE" -f "k8s/${b}/"
 
