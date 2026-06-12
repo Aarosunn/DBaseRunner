@@ -24,5 +24,6 @@ import from server {
         bench_feed,
         bench_single_hop,
         load_own_tweets,
+        seed_tweets,
         health
     }
