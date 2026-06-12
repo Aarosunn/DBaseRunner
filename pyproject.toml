@@ -28,3 +28,11 @@ testpaths = ["tests"]
 target-version = "py312"
 # seed/ holds generated data; servers/ run on their own (jaclang / fastapi) stacks.
 extend-exclude = ["seed", "servers"]
+
+[tool.pyright]
+# Resolve harness imports (requests) against the uv-managed venv so the editor
+# stops flagging unresolved imports. servers/ are separate stacks — not analyzed.
+venvPath = "."
+venv = ".venv"
+include = ["backends", "tests", "harness.py", "seed_gen.py", "plot.py"]
+exclude = ["servers", "seed", ".venv"]
