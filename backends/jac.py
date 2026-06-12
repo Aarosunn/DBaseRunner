@@ -13,7 +13,8 @@ class JacBackend(BackendBase):
         return {"username": username, "password": password}
 
     def _parse_token(self, body: dict) -> str:
-        return body["token"]
+        # jac-cloud login: {"ok": true, "data": {"username", "token", "root_id"}}
+        return body["data"]["token"]
 
     def _extract_tweets(self, body: dict) -> list:
         # jac-cloud wraps reports: {"status":200,"reports":[{"tweets":[...]}]}.
