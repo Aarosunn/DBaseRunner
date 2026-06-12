@@ -17,10 +17,11 @@ class JacBackend(BackendBase):
         return body["data"]["token"]
 
     def _extract_tweets(self, body: dict) -> list:
-        # jac-cloud wraps reports: {"status":200,"reports":[{"tweets":[...]}]}.
-        if "data" in body:
-            return (body["data"] or {}).get("result") or []
-        reports = body.get("reports") or []
+        # jac-cloud envelope: {"ok":true, "data":{"result":<walker meta dict>,
+        #   "reports":[{"tweets":[...]} | {"error":"No profile"}]}}.
+        # The tweets live in the first WALKER REPORT, not in data.result (which
+        # is walker metadata). Error/"No profile" reports have no "tweets" -> [].
+        reports = (body.get("data") or {}).get("reports") or body.get("reports") or []
         if reports and isinstance(reports[0], dict):
             return reports[0].get("tweets") or []
         return []
