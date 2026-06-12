@@ -7,7 +7,6 @@ dist/
 build/
 .pytest_cache/
 .coverage
-*.csv
 !results/.gitkeep
 figures/*.png
 figures/*.pdf
