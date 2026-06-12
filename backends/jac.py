@@ -6,9 +6,12 @@ from .base import BackendBase, seed_tweets_payload
 
 
 class JacBackend(BackendBase):
-    # jac-cloud auth uses an email-like field + a real JWT.
+    # jac-cloud auth uses an email-like field + a real JWT. jac-cloud validates
+    # the email format, so the harness's plain usernames (bench_<run>_<sweep>_<param>)
+    # are wrapped into a valid email. Same value for register + login (consistent
+    # identity); a distinct address per param point preserves the namespacing.
     def _register_body(self, username: str, password: str) -> dict:
-        return {"email": username, "password": password}
+        return {"email": f"{username}@example.com", "password": password}
 
     def _parse_token(self, body: dict) -> str:
         return body["token"]
