@@ -77,10 +77,10 @@ All backends use the uniform `dbaserunner-*` k8s manifests under `k8s/<backend>/
 code as a prebuilt image; two (no-build) ship it via a source ConfigMap populated from the
 current repo files by `./k8s-configmap.sh <backend>`.
 
-| Backend | How code is delivered | Update command (after editing server code) |
+| Backend | How code is delivered | Update after editing server code |
 |---|---|---|
-| **postgres** | prebuilt image `dbaserunner/postgres-app:latest` | `docker build -t dbaserunner/postgres-app:latest servers/postgres && docker push dbaserunner/postgres-app:latest` |
-| **neo4j** | prebuilt image `dbaserunner/neo4j-app:latest` | `docker build -t dbaserunner/neo4j-app:latest servers/neo4j && docker push dbaserunner/neo4j-app:latest` |
+| **postgres** | custom app image `dbaserunner/postgres-app:vN` | build into minikube with a **new tag** — see the minikube box below |
+| **neo4j** | custom app image `dbaserunner/neo4j-app:vN` | build into minikube with a **new tag** — see the minikube box below |
 | **jac** | `dbaserunner-jac-src` **ConfigMap** (main.jac + server.jac + jac.toml) | `./k8s-configmap.sh jac` |
 | **sqlalchemy** | `dbaserunner-sqlalchemy-src` **ConfigMap** | `./k8s-configmap.sh sqlalchemy` |
 
@@ -90,6 +90,21 @@ ConfigMap step is per-backend, so deploying one backend never touches another.
 > The Phase-4 changes (`like_count`, `seed_tweets`, the `like_count > 10` predicate) are in
 > these files — they are NOT in the running pods until you rebuild the image / re-run
 > `k8s-configmap.sh`.
+
+> **⚠ minikube image gotchas (these cost hours — read before building).**
+> minikube uses `imagePullPolicy: Never`, so it serves whatever local image the tag points at.
+> 1. **Never reuse a tag.** Re-loading `dbaserunner/postgres-app:latest` does NOT replace the
+>    running layer — the pod keeps serving the old sha. Bump the tag every build (`:v2`, `:v3`, …)
+>    and update the manifest to match. No `docker push` / registry is involved.
+> 2. **Build straight into minikube**, which skips the flaky `minikube image load`:
+>    ```bash
+>    eval $(minikube docker-env)
+>    docker build -t dbaserunner/postgres-app:v3 servers/postgres
+>    eval $(minikube docker-env -u)
+>    sed -i 's|dbaserunner/postgres-app:[^"[:space:]]*|dbaserunner/postgres-app:v3|' k8s/postgres/*.yaml
+>    ```
+> 3. **Confirm the pod is on the new tag** before trusting it:
+>    `kubectl get pod -o jsonpath='{.items[*].spec.containers[0].image}{"\n"}' | grep postgres-app`
 
 > **⚠ jac deploy is unverified.** `k8s/jac/deployment.yaml` runs `jac start --scale` *inside* a
 > pod. jac-cloud's `--scale` mode normally self-deploys to k8s (that's what `servers/jac/deploy.sh`
@@ -113,10 +128,23 @@ One backend, manually:
 ```bash
 kubectl apply -f k8s/postgres/
 kubectl rollout status deployment/postgres-app
-kubectl port-forward svc/postgres-app 8000:8000 &
-uv run python harness.py --backend postgres --url http://localhost:8000 \
+
+# Use a FREE local port and bind IPv4 explicitly. If port-forward prints only
+# "[::1]:PORT" (no 127.0.0.1), that local port is already taken — pick another.
+pkill -9 -f "kubectl port-forward"; ss -tlnp | grep :8001    # 8001 must be free (no output)
+kubectl port-forward --address 127.0.0.1 svc/postgres-app 8001:8000 >/tmp/pf.log 2>&1 &
+sleep 2; cat /tmp/pf.log                                     # must say 127.0.0.1:8001 -> 8000
+
+# Sanity-check you're on the right app BEFORE running the harness:
+curl -s -o /dev/null -w "%{http_code}\n" -X POST http://127.0.0.1:8001/walker/load_own_tweets
+#   401 = correct app, route exists, needs auth (the harness logs in) -> good
+#   405 = WRONG app on this port (e.g. a stray `jac serve`); find it: ss -tlnp | grep :8001
+
+uv run python harness.py --backend postgres --url http://localhost:8001 \
     --run-id run01 --sweep fanout selectivity
 ```
+> Sanity-check the result CSV: `response_bytes` should grow with `param_value` on the fanout
+> sweep (more tweets seeded → bigger payload). Flat or zero bytes means the seed did not land.
 
 All four, automated (apply → wait → port-forward → harness → teardown per backend):
 ```bash
