@@ -1,0 +1,66 @@
+{
+ "likes_threshold": 10,
+ "points": [
+  {
+   "expected_matching": 5,
+   "file": "fanout_100.json",
+   "param_value": 100,
+   "sweep_type": "fanout"
+  },
+  {
+   "expected_matching": 13,
+   "file": "fanout_250.json",
+   "param_value": 250,
+   "sweep_type": "fanout"
+  },
+  {
+   "expected_matching": 25,
+   "file": "fanout_500.json",
+   "param_value": 500,
+   "sweep_type": "fanout"
+  },
+  {
+   "expected_matching": 38,
+   "file": "fanout_750.json",
+   "param_value": 750,
+   "sweep_type": "fanout"
+  },
+  {
+   "expected_matching": 50,
+   "file": "fanout_1000.json",
+   "param_value": 1000,
+   "sweep_type": "fanout"
+  },
+  {
+   "expected_matching": 100,
+   "file": "selectivity_10.json",
+   "param_value": 10,
+   "sweep_type": "selectivity"
+  },
+  {
+   "expected_matching": 250,
+   "file": "selectivity_25.json",
+   "param_value": 25,
+   "sweep_type": "selectivity"
+  },
+  {
+   "expected_matching": 500,
+   "file": "selectivity_50.json",
+   "param_value": 50,
+   "sweep_type": "selectivity"
+  },
+  {
+   "expected_matching": 750,
+   "file": "selectivity_75.json",
+   "param_value": 75,
+   "sweep_type": "selectivity"
+  },
+  {
+   "expected_matching": 1000,
+   "file": "selectivity_100.json",
+   "param_value": 100,
+   "sweep_type": "selectivity"
+  }
+ ],
+ "spec_version": 1
+}

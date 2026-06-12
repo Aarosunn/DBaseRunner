@@ -392,6 +392,13 @@ def like_tweet(
                 (tid, uid),
             )
 
+        # Keep the denormalized like_count in sync with the likes table (R6).
+        cur.execute(
+            "UPDATE tweets SET like_count = "
+            "(SELECT COUNT(*) FROM likes WHERE tweet_id = %s) WHERE id = %s",
+            (tid, tid),
+        )
+
         cur.execute(
             """
             SELECT COALESCE(json_agg(u.username), '[]'::json) AS likes
@@ -488,6 +495,7 @@ def load_own_tweets(current_user: dict = Depends(get_current_user)):
                 'content', t.content,
                 'author_username', u.username,
                 'created_at', t.created_at,
+                'like_count', t.like_count,
                 'likes', COALESCE((
                     SELECT json_agg(u2.username)
                     FROM likes l JOIN users u2 ON u2.id = l.user_id
@@ -505,7 +513,7 @@ def load_own_tweets(current_user: dict = Depends(get_current_user)):
         ), '[]'::json) AS tweets
         FROM tweets t
         JOIN users u ON u.id = t.author_id
-        WHERE t.author_id = %s
+        WHERE t.author_id = %s AND t.like_count > 10
     """
     t0 = time.perf_counter()
     with db.conn() as c, c.cursor() as cur:
@@ -574,4 +582,83 @@ def import_data(body: dict = Body(default={})):
                 viewer_follows,
             )
 
+    return singleton_response({"success": True})
+
+
+# ---------------------------------------------------------------------------
+# seed_tweets — PUBLIC (no auth). Single-hop benchmark seeding (seed-design-spec).
+# Body: {author_username, likers:[name...],
+#        tweets:[{content, created_at, like_count, likers:[name...],
+#                 comments:[{author, content, created_at}]}]}
+# Tweets are attached to author_username (upserted). Likers are upserted by
+# username; like_count is stored verbatim and kept == len(likers) by the seed
+# generator. One transaction per call.
+# ---------------------------------------------------------------------------
+
+def _parse_ts(value):
+    return datetime.fromisoformat(value.replace("Z", "+00:00"))
+
+
+def _upsert_user(cur, username):
+    return cur.execute(
+        "INSERT INTO users (username, handle, password, created_at) "
+        "VALUES (%s, %s, '', now()) "
+        "ON CONFLICT (username) DO UPDATE SET handle = EXCLUDED.handle "
+        "RETURNING id",
+        (username, username),
+    ).fetchone()["id"]
+
+
+@router.post("/seed_tweets")
+def seed_tweets(body: dict = Body(default={})):
+    author_username = body["author_username"]
+    tweets = body.get("tweets", [])
+    liker_pool = body.get("likers", [])
+
+    with db.conn() as c, c.cursor() as cur:
+        author_id = _upsert_user(cur, author_username)
+        liker_ids = {name: _upsert_user(cur, name) for name in liker_pool}
+
+        for tw in tweets:
+            tweet_id = cur.execute(
+                "INSERT INTO tweets (author_id, content, like_count, created_at) "
+                "VALUES (%s, %s, %s, %s) RETURNING id",
+                (author_id, tw["content"], tw["like_count"],
+                 _parse_ts(tw["created_at"])),
+            ).fetchone()["id"]
+
+            likes = [(tweet_id, liker_ids[name])
+                     for name in tw.get("likers", []) if name in liker_ids]
+            if likes:
+                cur.executemany(
+                    "INSERT INTO likes (tweet_id, user_id) VALUES (%s, %s) "
+                    "ON CONFLICT DO NOTHING",
+                    likes,
+                )
+
+            comments = [
+                (tweet_id, com["author"], com["content"], _parse_ts(com["created_at"]))
+                for com in tw.get("comments", [])
+            ]
+            if comments:
+                cur.executemany(
+                    "INSERT INTO comments (tweet_id, author_handle, content, created_at) "
+                    "VALUES (%s, %s, %s, %s)",
+                    comments,
+                )
+
+    return singleton_response({"success": True, "seeded": len(tweets)})
+
+
+# ---------------------------------------------------------------------------
+# clear_data — PUBLIC. Best-effort full wipe (harness --reset only).
+# ---------------------------------------------------------------------------
+
+@router.post("/clear_data")
+def clear_data():
+    with db.conn() as c, c.cursor() as cur:
+        cur.execute(
+            "TRUNCATE comments, likes, follows, channel_members, "
+            "channels, tweets, users RESTART IDENTITY CASCADE"
+        )
     return singleton_response({"success": True})

@@ -152,9 +152,10 @@ def load_own_tweets(request: Request):
     uid = _bearer_username(request)
     cypher = (
         "MATCH (p:Profile {jac_id: $uid})-[:POST]->(t:Tweet) "
+        "WHERE t.like_count > 10 "
         "RETURN t.jac_id AS id, t.content AS content, "
         "       t.author_username AS author_username, "
-        "       t.created_at AS created_at, "
+        "       t.created_at AS created_at, t.like_count AS like_count, "
         "       t.likes AS likes, t.comments AS comments"
     )
     t0 = time.perf_counter()
@@ -169,6 +170,7 @@ def load_own_tweets(request: Request):
             "content": r["content"],
             "author_username": r["author_username"],
             "created_at": r["created_at"],
+            "like_count": r["like_count"] if r["like_count"] is not None else len(r["likes"] or []),
             "likes": r["likes"] or [],
             "comments": [
                 json.loads(c) if isinstance(c, str) else c
@@ -193,6 +195,56 @@ def clear_data():
     with driver.session() as s:
         s.run("MATCH (n) DETACH DELETE n")
     return _resp({"success": True, "message": "Database reset"})
+
+
+# ---------------------------------------------------------------------------
+# seed_tweets — PUBLIC. Single-hop benchmark seeding (seed-design-spec).
+# Body: {author_username, likers:[name...],
+#        tweets:[{content, created_at, like_count, likers:[name...],
+#                 comments:[{author, content, created_at}]}]}
+# Likers are stored idiomatically as a name array on the Tweet (no nodes);
+# comments are stored as JSON strings (load_own_tweets parses them back).
+# Batch via UNWIND, not per-tweet round-trips.
+# ---------------------------------------------------------------------------
+
+@app.post("/walker/seed_tweets")
+@app.post("/function/seed_tweets")
+def seed_tweets(body: Optional[dict] = Body(default=None)):
+    if body is None:
+        raise HTTPException(status_code=422, detail="Expected JSON body")
+    author = body["author_username"]
+    tweets_param = [
+        {
+            "idx": i,
+            "content": tw["content"],
+            "created_at": tw["created_at"],
+            "like_count": tw["like_count"],
+            "likes": tw.get("likers", []),
+            "comments": [json.dumps(c) for c in tw.get("comments", [])],
+        }
+        for i, tw in enumerate(body.get("tweets", []))
+    ]
+    with driver.session() as s:
+        s.run(
+            """
+            MERGE (p:Profile {jac_id: $author})
+              ON CREATE SET p.username = $author, p.handle = $author, p.bio = ''
+            WITH p
+            UNWIND $tweets AS tw
+            CREATE (p)-[:POST]->(:Tweet {
+                jac_id: $author + '_t_' + toString(tw.idx),
+                content: tw.content,
+                author_username: p.username,
+                created_at: tw.created_at,
+                like_count: tw.like_count,
+                likes: tw.likes,
+                comments: tw.comments
+            })
+            """,
+            author=author,
+            tweets=tweets_param,
+        )
+    return _resp({"success": True, "seeded": len(tweets_param)})
 
 
 # ---------------------------------------------------------------------------
@@ -229,6 +281,7 @@ def like_tweet(body: LikeTweet, request: Request):
                 WHEN already_liked THEN [x IN t.likes WHERE x <> $uid]
                 ELSE t.likes + [$uid]
             END
+            SET t.like_count = size(t.likes)
             RETURN t.likes AS likes, NOT already_liked AS liked
             """,
             tweet_id=body.tweet_id,

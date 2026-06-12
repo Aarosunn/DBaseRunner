@@ -51,15 +51,19 @@ CREATE TABLE IF NOT EXISTS tweets (
     id          BIGSERIAL    PRIMARY KEY,
     author_id   BIGINT       NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     content     TEXT         NOT NULL,
+    -- Denormalized like counter: the selectivity-sweep predicate is the scalar
+    -- comparison `like_count > K` (K=10), evaluated inside the index-only scan.
+    -- Kept consistent with the likes table by seed_tweets / like_tweet.
+    like_count  BIGINT       NOT NULL DEFAULT 0,
     created_at  TIMESTAMPTZ  NOT NULL DEFAULT now()
 );
 
 -- THE critical index: composite covering index for "fetch this user's
--- tweets in created_at DESC order". With INCLUDE (content), Postgres can
--- answer the entire load_feed sub-query as an index-only scan and never
--- touch the heap.
+-- tweets in created_at DESC order". INCLUDE (content, like_count) lets Postgres
+-- answer load_own_tweets — including the `like_count > K` predicate — as an
+-- index-only scan and never touch the heap.
 CREATE INDEX IF NOT EXISTS idx_tweets_author_created
-    ON tweets (author_id, created_at DESC) INCLUDE (content);
+    ON tweets (author_id, created_at DESC) INCLUDE (content, like_count);
 
 -- pg_trgm GIN for substring search. Postgres' LIKE/ILIKE planner uses
 -- gin_trgm_ops for `%query%` patterns, so the search bench drops from a

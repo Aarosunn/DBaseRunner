@@ -40,6 +40,10 @@ node Tweet {
     has content: str = "";
     has author_username: str = "";
     has created_at: str = "";
+    # Denormalized like counter: the selectivity-sweep predicate is the scalar
+    # field comparison `like_count > K` (K=10), expressed in the traversal so
+    # Filter Pushdown can evaluate it in the storage engine. Kept == len(likes).
+    has like_count: int = 0;
     has comments: list = [];
     has jac_id: str = "";
 }
@@ -256,12 +260,14 @@ walker like_tweet {
         if existing_liked_tweet {
             target = existing_liked_tweet[0];
             me del --> target;
+            target.like_count -= 1;  # keep denormalized count in sync (R6)
             report {"liked": False, "likes":[u.username for u in [target<-:Like:<-Profile]]};
             disengage;
         }
         target = find_tweet(self.tweet_id);
         if target {
             me +>: Like :+> target;
+            target.like_count += 1;  # keep denormalized count in sync (R6)
             report {"liked": True, "likes":[u.username for u in [target<-:Like:<-Profile]]};
             disengage;
         }
@@ -890,13 +896,14 @@ walker:pub load_own_tweets {
 
         t0 = perf_counter();
         tweet_data: list = [];
-        for tweet in [my_profile-->(?:Tweet)] {
+        for tweet in [my_profile-->(?:Tweet, like_count > 10)] {
             likers = [tweet<-:Like:<-(?:Profile)];
             tweet_data.append({
                 "id": tweet.jac_id,
                 "content": tweet.content,
                 "author_username": tweet.author_username,
                 "created_at": tweet.created_at,
+                "like_count": tweet.like_count,
                 "likes": [p.username for p in likers],
                 "comments": tweet.comments
             });
@@ -940,6 +947,50 @@ walker:pub clear_cache {
             "stubbed_nodes": stubbed,
             "message": "Edges stubbed, L1 and L2 caches cleared"
         };
+    }
+}
+
+walker:pub seed_tweets {
+    # Single-hop benchmark seeding (seed-design-spec). Called WITH the eval
+    # user's JWT; tweets are created under the caller's Profile via Post edges.
+    # likers: the pool of liker usernames (run-agnostic). Each tweet's `likers`
+    # list selects names from the pool; Like edges are detached Profile -> Tweet.
+    has likers: list = [];
+    has tweets: list = [];
+
+    can run with Root entry {
+        # Ensure the caller's Profile exists (ensure_user only registers+logs in).
+        profiles = [-->(?:Profile)];
+        if not profiles {
+            created = here ++> Profile(username="eval", bio="", created_at=_now());
+            grant(created[0], level=ConnectPerm);
+            created[0].jac_id = jid(created[0]);
+            my_profile = created[0];
+        } else {
+            my_profile = profiles[0];
+        }
+
+        # Detached liker Profiles (username-only); persisted via their Like edges.
+        liker_nodes: dict = {};
+        for lname in self.likers {
+            liker_nodes[lname] = Profile(username=lname, jac_id=lname);
+        }
+
+        for tw in self.tweets {
+            new_tweet = my_profile +>:Post():+> Tweet(
+                content=tw["content"],
+                author_username=my_profile.username,
+                created_at=tw["created_at"],
+                like_count=tw["like_count"],
+                comments=tw["comments"]
+            );
+            new_tweet[0].jac_id = jid(new_tweet[0]);
+            grant(new_tweet[0], level=ConnectPerm);
+            for lname in tw["likers"] {
+                liker_nodes[lname] +>:Like:+> new_tweet[0];
+            }
+        }
+        report {"success": True, "seeded": len(self.tweets)};
     }
 }
 

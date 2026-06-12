@@ -107,15 +107,20 @@ class Tweet(db.Model):
     author: Mapped['User'] = relationship(back_populates='tweets')
     # load_feed does ORDER BY created_at; without an index that's a full sort.
     created_at: Mapped[datetime] = mapped_column(index=True)
+    # Denormalized like counter: the selectivity-sweep predicate is the scalar
+    # `like_count > K` (K=10), pushed into the SQL WHERE. Kept == len(likes) by
+    # seed_tweets / like_tweet.
+    like_count: Mapped[int] = mapped_column(default=0)
     likes: Mapped[List['User']] = relationship(secondary=like_table)
     comments: Mapped[List['Comment']] = relationship(back_populates='tweet')
-    
+
     def report(self):
        return {
            "id": self.id,
            "content": self.content,
            "author_username": self.author.username,
            "created_at": self.created_at.isoformat(),
+           "like_count": self.like_count,
            "likes": [u.username for u in self.likes],
            "comments": [c.report() for c in self.comments]
        }

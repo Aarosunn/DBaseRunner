@@ -252,6 +252,8 @@ def like_tweet(
     else:
         tweet.likes.remove(current_user)
 
+    # Keep the denormalized like_count in sync with the likes relationship (R6).
+    tweet.like_count = len(tweet.likes)
     db.commit()
     return singleton_response({"liked": not existing_like, "likes": tweet.report_likes()})
 
@@ -311,7 +313,7 @@ def load_own_tweets(
     t0 = time.perf_counter()
     tweets = db.execute(
         select(Tweet)
-        .where(Tweet.author_id == current_user.id)
+        .where(Tweet.author_id == current_user.id, Tweet.like_count > 10)
         .options(
             joinedload(Tweet.author),
             selectinload(Tweet.likes),
@@ -380,5 +382,81 @@ def import_data(
     ]
     db.execute(following_table.insert(), viewer_follows)
 
+    db.commit()
+    return singleton_response({"success": True})
+
+
+# ---------------------------------------------------------------------------
+# seed_tweets — PUBLIC (no auth). Single-hop benchmark seeding (seed-design-spec).
+# Body: {author_username, likers:[name...],
+#        tweets:[{content, created_at, like_count, likers:[name...],
+#                 comments:[{author, content, created_at}]}]}
+# ---------------------------------------------------------------------------
+
+def _seed_parse_ts(value: str) -> datetime:
+    return datetime.fromisoformat(value.replace("Z", "+00:00"))
+
+
+def _seed_upsert_user(db: Session, username: str) -> User:
+    user = db.execute(select(User).filter_by(username=username)).scalar()
+    if user is None:
+        user = User(username=username, handle=username, password="",
+                    bio="", created_at=datetime.utcnow())
+        db.add(user)
+        db.flush()
+    return user
+
+
+@router.post("/seed_tweets")
+def seed_tweets(
+    body: Optional[dict] = Body(default=None),
+    db: Session = Depends(get_db),
+):
+    if body is None:
+        raise HTTPException(status_code=422, detail="Expected JSON body")
+
+    author = _seed_upsert_user(db, body["author_username"])
+    liker_ids = {name: _seed_upsert_user(db, name).id
+                 for name in body.get("likers", [])}
+
+    tweets = body.get("tweets", [])
+    if tweets:
+        ids = db.scalars(
+            insert(Tweet).returning(Tweet.id, sort_by_parameter_order=True),
+            [{
+                "content": t["content"],
+                "author_id": author.id,
+                "created_at": _seed_parse_ts(t["created_at"]),
+                "like_count": t["like_count"],
+            } for t in tweets],
+        ).all()
+        for idx, t in enumerate(tweets):
+            tweet_id = ids[idx]
+            likes = [{"tweet_id": tweet_id, "user_id": liker_ids[name]}
+                     for name in t.get("likers", []) if name in liker_ids]
+            if likes:
+                db.execute(like_table.insert(), likes)
+            for com in t.get("comments", []):
+                db.add(Comment(handle=com["author"], content=com["content"],
+                               tweet_id=tweet_id,
+                               created_at=_seed_parse_ts(com["created_at"])))
+
+    db.commit()
+    return singleton_response({"success": True, "seeded": len(tweets)})
+
+
+# ---------------------------------------------------------------------------
+# clear_data — PUBLIC. Best-effort full wipe (harness --reset only).
+# ---------------------------------------------------------------------------
+
+@router.post("/clear_data")
+def clear_data(db: Session = Depends(get_db)):
+    db.execute(delete(Comment))
+    db.execute(like_table.delete())
+    db.execute(following_table.delete())
+    db.execute(channel_members_table.delete())
+    db.execute(delete(Channel))
+    db.execute(delete(Tweet))
+    db.execute(delete(User))
     db.commit()
     return singleton_response({"success": True})
