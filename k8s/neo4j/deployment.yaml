@@ -12,6 +12,7 @@ spec:
       labels:
         app: neo4j-db
     spec:
+      enableServiceLinks: false
       # k8s injects NEO4J_DB_SERVICE_* env vars (service is named neo4j-db); the
       # neo4j image reads NEO4J_* as config and strict-validation crashes on them.
       enableServiceLinks: false
@@ -55,6 +56,7 @@ spec:
       labels:
         app: neo4j-app
     spec:
+      enableServiceLinks: false
       enableServiceLinks: false
       containers:
         - name: neo4j-app

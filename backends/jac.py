@@ -6,18 +6,22 @@ from .base import BackendBase, seed_tweets_payload
 
 
 class JacBackend(BackendBase):
-    # jac-cloud auth uses an email-like field + a real JWT.
+    # jac-cloud /user/register and /user/login both require {username, password}
+    # (verified via inspect_schema.py against the running server). The bench
+    # username (bench_<run>_<sweep>_<param>) goes through as-is; no email field.
     def _register_body(self, username: str, password: str) -> dict:
-        return {"email": username, "password": password}
+        return {"username": username, "password": password}
 
     def _parse_token(self, body: dict) -> str:
-        return body["token"]
+        # jac-cloud login: {"ok": true, "data": {"username", "token", "root_id"}}
+        return body["data"]["token"]
 
     def _extract_tweets(self, body: dict) -> list:
-        # jac-cloud wraps reports: {"status":200,"reports":[{"tweets":[...]}]}.
-        if "data" in body:
-            return (body["data"] or {}).get("result") or []
-        reports = body.get("reports") or []
+        # jac-cloud envelope: {"ok":true, "data":{"result":<walker meta dict>,
+        #   "reports":[{"tweets":[...]} | {"error":"No profile"}]}}.
+        # The tweets live in the first WALKER REPORT, not in data.result (which
+        # is walker metadata). Error/"No profile" reports have no "tweets" -> [].
+        reports = (body.get("data") or {}).get("reports") or body.get("reports") or []
         if reports and isinstance(reports[0], dict):
             return reports[0].get("tweets") or []
         return []
