@@ -43,4 +43,4 @@ if [[ -n "${2:-}" ]]; then
   echo "  manifest k8s/${BACKEND}/ now pins ${IMAGE}:${TAG}"
 fi
 
-echo "==> built ${IMAGE}:${TAG}. Deploy via orchestrate.sh, then curl-check (401 = good)."
+echo "==> built ${IMAGE}:${TAG}. Deploy via baselines.sh, then curl-check (401 = good)."

@@ -1,21 +1,22 @@
 #!/usr/bin/env bash
-# Orchestrate a full benchmark run on the clarity k8s cluster.
+# Run the BASELINE backends (postgres, sqlalchemy, neo4j) on the clarity cluster.
+# (Renamed from orchestrate.sh — it only does the 3 manifest backends, not jac.)
 #
 # Per backend: apply manifests -> wait for app rollout -> port-forward ->
 # run harness.py (client-side timing) -> stop port-forward -> tear down.
+# Sequential + teardown-between, so the Guaranteed-QoS pods never overcommit.
 #
-# Phase 5 needs the SAME --run-id across all four backends, so a single run_id
-# is generated once here and passed to every harness invocation.
+# Phase 5 needs the SAME --run-id across all backends, so one run_id is generated
+# once here and passed to every harness invocation; pass the same to the jac run.
 #
-# Handles the three manifest-based backends (postgres, sqlalchemy, neo4j).
-# jac is NOT orchestrated here — it self-deploys via servers/jac/deploy.sh
-# (jac start --scale); run it separately, then point harness.py at port 8080.
+# jac is NOT handled here — it self-deploys via servers/jac/deploy.sh
+# (jac start --scale); run it separately on port 8080 (--backend jac errors here).
 #
 # Usage:
-#   ./orchestrate.sh                         # postgres, sqlalchemy, neo4j; default sweeps
-#   ./orchestrate.sh --backend postgres      # one backend
-#   ./orchestrate.sh --keep                  # don't tear down pods after each run
-#   ./orchestrate.sh --run-id r42 -- --sweep fanout --trials 30
+#   ./baselines.sh                         # postgres, sqlalchemy, neo4j; default sweeps
+#   ./baselines.sh --backend postgres      # one backend
+#   ./baselines.sh --keep                  # don't tear down pods after each run
+#   ./baselines.sh --run-id r42 -- --sweep fanout --trials 30
 #                                            # everything after `--` is passed to harness.py
 #
 # Env: NAMESPACE (default: default), LOCAL_PORT (default: 8000),

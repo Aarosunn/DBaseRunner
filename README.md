@@ -23,7 +23,7 @@ DBaseRunner/
   harness.py            # client-side perf_counter timing + seed/verify flow + CSV
   seed_gen.py           # deterministic seed generator -> seed/*.json
   plot.py               # results/*.csv -> figures/ (Fig5/Fig6 + bytes sanity)
-  orchestrate.sh        # deploy -> wait -> port-forward -> harness -> teardown (per backend)
+  baselines.sh        # deploy -> wait -> port-forward -> harness -> teardown (per backend)
   backends/             # control-plane adapters (auth, seed, load_own_tweets, health)
   seed/                 # committed deterministic seed specs (10 points + manifest)
   servers/{jac,postgres,sqlalchemy,neo4j}/   # the 4 backend services (deployed separately)
@@ -84,9 +84,9 @@ current repo files by `./k8s-configmap.sh <backend>`.
 | **jac** | self-deploys via `jac start --scale` (no manifest, no ConfigMap) | re-run `servers/jac/deploy.sh` |
 | **sqlalchemy** | `dbaserunner-sqlalchemy-src` **ConfigMap** | `./k8s-configmap.sh sqlalchemy` |
 
-`orchestrate.sh` handles only the three manifest-based backends (postgres, sqlalchemy, neo4j)
+`baselines.sh` handles only the three manifest-based backends (postgres, sqlalchemy, neo4j)
 and runs `k8s-configmap.sh` automatically for sqlalchemy before `apply`. **jac is not
-orchestrated** — it deploys natively (see the jac box below), and `orchestrate.sh --backend jac`
+orchestrated** — it deploys natively (see the jac box below), and `baselines.sh --backend jac`
 errors out with a pointer to `deploy.sh`. The ConfigMap step is per-backend, so deploying one
 backend never touches another.
 
@@ -170,7 +170,7 @@ uv run python harness.py --backend postgres --url http://localhost:8001 \
 |---|---|---|
 | `./preflight.sh` | **all backends, every session** | kill stray jac servers + port-forwards, check ports `8001`/`8080` free, show pods |
 | `./build.sh <postgres\|neo4j>` | image backends only | build the app image into minikube at the tag the manifest pins (`:v1`) — sqla/jac rejected |
-| `./orchestrate.sh --backend <b>` | the **3 manifest** backends (postgres, sqlalchemy, neo4j) | apply → wait → port-forward → harness → teardown. **Sequential + tears down each before the next** (required: Guaranteed-QoS pods can't overcommit) |
+| `./baselines.sh --backend <b>` | the **3 manifest** backends (postgres, sqlalchemy, neo4j) | apply → wait → port-forward → harness → teardown. **Sequential + tears down each before the next** (required: Guaranteed-QoS pods can't overcommit) |
 | `servers/jac/deploy.sh` / `teardown.sh` | jac only | jac self-deploys via `--scale`; reach it on **8080** |
 | `uv run python plot.py` | — | CSVs → figures |
 
@@ -183,7 +183,7 @@ uv run python harness.py --backend postgres --url http://localhost:8001 \
 ```bash
 ./preflight.sh                              # clean slate first
 for b in postgres sqlalchemy neo4j; do
-  LOCAL_PORT=8001 ./orchestrate.sh --backend "$b" --run-id run01 -- --sweep fanout
+  LOCAL_PORT=8001 ./baselines.sh --backend "$b" --run-id run01 -- --sweep fanout
 done
 ```
 Default 20 warmup / 30 trials. **Fanout only** — the selectivity sweep is still the
@@ -199,7 +199,7 @@ JAC_BENCH_URL=http://localhost:8080 uv run pytest tests/test_jac_isolation.py -q
 # green -> isolation restored, jac data trustworthy:
 uv run python harness.py --backend jac --url http://localhost:8080 --run-id run01 --sweep fanout
 ```
-`orchestrate.sh --backend jac` intentionally errors with a pointer to `deploy.sh` (jac is not
+`baselines.sh --backend jac` intentionally errors with a pointer to `deploy.sh` (jac is not
 manifest-deployed). Env knobs: `NAMESPACE`, `LOCAL_PORT`, `ROLLOUT_TIMEOUT`, `HEALTH_RETRIES`.
 
 > **Phase 5 requires the SAME `--run-id` across all backend runs** so the seeded usernames/data

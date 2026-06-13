@@ -262,7 +262,7 @@ python3 -c "import jaclang; print(jaclang.__version__)"</pre>
     postgres/
     sqlalchemy/
     neo4j/
-  orchestrate.sh          # deploy → wait for health → run harness → teardown → next
+  baselines.sh          # deploy → wait for health → run harness → teardown → next
   results/                # raw per-trial CSVs committed here — never pre-aggregated
   plot.py                 # reads results/, outputs figures/ with error bars</pre>
 
@@ -325,7 +325,7 @@ def timed_call(session, url, payload):
         </ul>
       </li>
       <li>Add hop depth as sweep parameter: [1, 2, 3]</li>
-      <li>Add to harness and orchestrate.sh</li>
+      <li>Add to harness and baselines.sh</li>
     </ul>
     <div class="callout">This makes the paper's graph-model argument empirically grounded — not just "Jac is fast" but "Jac's graph abstraction scales better with traversal depth."</div>
   </div>
@@ -375,7 +375,7 @@ def timed_call(session, url, payload):
   backends/              # base.py + jac/postgres/sqlalchemy/neo4j adapters
   servers/               # the 4 backend server impls (jac, pg, sqla, neo4j)
   k8s/                   # deployment YAMLs per backend
-  orchestrate.sh         # deploy → health → run → next
+  baselines.sh         # deploy → health → run → next
   results/  figures/  plot.py
   HARNESS_CONTEXT.md     &lt;-- authoritative current methodology (read first)
   HARNESS_REBUILD.html   &lt;-- this file (phase plan)

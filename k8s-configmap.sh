@@ -9,7 +9,7 @@
 # (jac start --scale), which reads servers/jac/*.jac directly. No ConfigMap.
 #
 # Per-backend by design: populating one backend's ConfigMap never touches another.
-# Called standalone or from orchestrate.sh before `kubectl apply -f k8s/<b>/`.
+# Called standalone or from baselines.sh before `kubectl apply -f k8s/<b>/`.
 #
 # Usage:  ./k8s-configmap.sh <sqlalchemy|postgres|neo4j>
 # Env:    NAMESPACE (default: default)

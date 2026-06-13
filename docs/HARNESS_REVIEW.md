@@ -32,7 +32,7 @@ deploy paths, not the headline — scope is called out per item.
 Second-pass bad-mood verdict on necessity, after re-verifying every item against
 live source. The findings below are evidence; this is the priority call. Two state
 changes since the first pass: **`k8s/jac/` was deleted** and jac was pulled from
-`orchestrate.sh` (resolves M4, re-scopes C1/C3); jac now deploys only via
+`baselines.sh` (resolves M4, re-scopes C1/C3); jac now deploys only via
 `servers/jac/deploy.sh` (`--scale`).
 
 **🔴 MUST FIX before any trustworthy 4-way run — these invalidate the comparison:**
@@ -65,7 +65,7 @@ changes since the first pass: **`k8s/jac/` was deleted** and jac was pulled from
   **C3-survivor** `JAC_INDEX_ENABLED` no-op → GTI-ablation line · **L1/L3/L4** →
   hardening.
 
-**✅ RESOLVED:** **M4** — `k8s/jac/` deleted + jac removed from `orchestrate.sh`
+**✅ RESOLVED:** **M4** — `k8s/jac/` deleted + jac removed from `baselines.sh`
 (2026-06-13). The ConfigMap-wipe race can no longer occur.
 
 > **Coordination:** the jac `:pub` isolation fix is owned by a separate session
@@ -200,7 +200,7 @@ a rebuild.
 **Fix:** bump postgres to an immutable tag (`:v1`) like neo4j.
 
 ### M4. ✅ RESOLVED (2026-06-13) — The `k8s/jac` ConfigMap manifest can wipe the source populated by `k8s-configmap.sh`
-> **Fixed:** `k8s/jac/` was deleted, jac removed from `orchestrate.sh`'s loop (now
+> **Fixed:** `k8s/jac/` was deleted, jac removed from `baselines.sh`'s loop (now
 > errors with a pointer to `deploy.sh`), and the jac case dropped from
 > `k8s-configmap.sh`. The race below can no longer occur. Original finding kept for
 > the record.
@@ -208,18 +208,18 @@ a rebuild.
   `kubectl create ... | kubectl apply` — `k8s-configmap.sh:29-32`
 - `k8s/jac/deployment.yaml` also declares a `dbaserunner-jac-src` ConfigMap **with
   no `data:`** (placeholder, commented out) — `k8s/jac/deployment.yaml:27-41`
-- `orchestrate.sh` runs the configmap script, then `kubectl apply -f k8s/jac/`
-  (which includes the empty ConfigMap) — `orchestrate.sh:84-90`
+- `baselines.sh` runs the configmap script, then `kubectl apply -f k8s/jac/`
+  (which includes the empty ConfigMap) — `baselines.sh:84-90`
 
 Applying the no-data ConfigMap after the populated one resets the
 last-applied-config to "no data" → kubectl's 3-way merge strips the populated
 keys → empty `/src` → init container copies nothing. Scope: only triggers on the
 deprecated in-pod manifest path; `README.md §3.1` already says deploy jac
-natively via `servers/jac/deploy.sh`, but `orchestrate.sh` still drives this path
-and lists jac **first** in `ORDER` (`orchestrate.sh:30`).
+natively via `servers/jac/deploy.sh`, but `baselines.sh` still drives this path
+and lists jac **first** in `ORDER` (`baselines.sh:30`).
 
 **Fix:** delete the placeholder ConfigMap object from `k8s/jac/deployment.yaml`
-(let `k8s-configmap.sh` be the sole owner), or remove jac from `orchestrate.sh`
+(let `k8s-configmap.sh` be the sole owner), or remove jac from `baselines.sh`
 entirely and document the native-only path.
 
 ---
@@ -247,8 +247,8 @@ the floor of the fanout grid.
 
 ### L3. A single non-2xx mid-sweep aborts the entire run
 - `timed_call` calls `resp.raise_for_status()` with no retry/skip — `harness.py:77`;
-  it propagates out through `run_sweep`/`main`, and `orchestrate.sh` runs under
-  `set -e` (`orchestrate.sh:19`)
+  it propagates out through `run_sweep`/`main`, and `baselines.sh` runs under
+  `set -e` (`baselines.sh:19`)
 
 One transient 500 during a 30-trial × 10-point × 4-backend run loses everything.
 Acceptable for a controlled benchmark but brittle; consider a bounded retry on
