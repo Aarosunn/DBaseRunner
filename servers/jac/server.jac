@@ -130,7 +130,7 @@ walker get_profile {
     }
 }
 
-walker:pub get_all_profiles {
+walker get_all_profiles {
     can run with Root entry {
         results: list = [];
         for r in allroots() {
@@ -883,10 +883,11 @@ walker:pub health {
     }
 }
 
-walker:pub load_own_tweets {
+walker load_own_tweets {
     can run with Root entry {
         import from time { perf_counter }
 
+        t_entry = perf_counter();
         my_profiles = [-->(?:Profile)];
         if not my_profiles {
             report {"error": "No profile"};
@@ -894,9 +895,16 @@ walker:pub load_own_tweets {
         }
         my_profile = my_profiles[0];
 
-        t0 = perf_counter();
+        # server_timing (fair-timing spec §3). Measurement seam only — the
+        # comprehension is UNCHANGED (typed ?:Tweet -> GTI, literal like_count > 10
+        # -> FP). ms_fetch = resolve the typed-neighbor list; ms_build = assemble
+        # the payload (incl. per-tweet liker resolve); server_total = entry -> return.
+        t_fetch0 = perf_counter();
+        my_tweets = [my_profile-->(?:Tweet, like_count > 10)];
+        t_fetch1 = perf_counter();
+
         tweet_data: list = [];
-        for tweet in [my_profile-->(?:Tweet, like_count > 10)] {
+        for tweet in my_tweets {
             likers = [tweet<-:Like:<-(?:Profile)];
             tweet_data.append({
                 "id": tweet.jac_id,
@@ -908,20 +916,20 @@ walker:pub load_own_tweets {
                 "comments": tweet.comments
             });
         }
-        ms_traversal = round((perf_counter() - t0) * 1000, 4);
-
-        t1 = perf_counter();
-        ms_build_payload = round((perf_counter() - t1) * 1000, 4);
+        t_build1 = perf_counter();
 
         report {
             "tweets": tweet_data,
-            "ms_traversal": ms_traversal,
-            "ms_build_payload": ms_build_payload
+            "server_timing": {
+                "ms_fetch": round((t_fetch1 - t_fetch0) * 1000, 4),
+                "ms_build": round((t_build1 - t_fetch1) * 1000, 4),
+                "server_total": round((t_build1 - t_entry) * 1000, 4)
+            }
         };
     }
 }
 
-walker:pub clear_cache {
+walker clear_cache {
     can run with Root entry {
         import from jaclang { JacRuntimeInterface as Jac }
         ctx = Jac.get_context();
@@ -950,7 +958,7 @@ walker:pub clear_cache {
     }
 }
 
-walker:pub seed_tweets {
+walker seed_tweets {
     # Single-hop benchmark seeding (seed-design-spec). Called WITH the eval
     # user's JWT; tweets are created under the caller's Profile via Post edges.
     # likers: the pool of liker usernames (run-agnostic). Each tweet's `likers`
@@ -994,7 +1002,7 @@ walker:pub seed_tweets {
     }
 }
 
-walker:pub import_data {
+walker import_data {
     has data: dict[dict[str, str, str, int, str, bool, list[dict[str, str, int, str]], list[str], str]];
 
     can run with Root entry {
