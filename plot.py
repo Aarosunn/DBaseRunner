@@ -15,12 +15,41 @@ import statistics
 from collections import defaultdict
 from pathlib import Path
 
-# Files in the results dir that are not per-trial latency CSVs.
 _SKIP = {"correctness.csv"}
+
+# Display names, colors, markers matching the paper's figure style.
+_BACKEND_STYLE = {
+    "jac":        {"label": "Jac GTI+FP",    "color": "#2ca02c", "marker": "o"},
+    "postgres":   {"label": "PG hand-tuned",  "color": "#1f77b4", "marker": "s"},
+    "sqlalchemy": {"label": "SQLAlchemy",     "color": "#9467bd", "marker": "D"},
+    "neo4j":      {"label": "Neo4j",          "color": "#d62728", "marker": "^"},
+}
+_DEFAULT_STYLE = {"label": None, "color": None, "marker": "o"}
+
+_AXIS_LABEL = {
+    "fanout":      "Fan-out (tweets authored)",
+    "selectivity": "Selectivity (% of own tweets matching like_count > 10)",
+    "hop_depth":   "Hop depth",
+}
+
+_TITLE = {
+    "fanout":      "Fan-out sweep (single-hop load_own_tweets)",
+    "selectivity": "Selectivity sweep at fan-out=1000",
+}
+
+_CAPTION = {
+    "fanout": (
+        "Client-side perf_counter timing via HTTP. 2 timed trials per point "
+        "(smoke run). All-warm cache. Single-hop workload."
+    ),
+    "selectivity": (
+        "Client-side perf_counter timing via HTTP. 2 timed trials per point "
+        "(smoke run). All-warm cache. Fan-out fixed at 1000."
+    ),
+}
 
 
 def read_results(results_dir):
-    """Read all per-trial CSV rows from results_dir (skipping non-trial files)."""
     rows = []
     for path in sorted(Path(results_dir).glob("*.csv")):
         if path.name in _SKIP:
@@ -31,7 +60,6 @@ def read_results(results_dir):
 
 
 def _percentiles(values):
-    """(median, p25, p75) — robust for n>=1."""
     med = statistics.median(values)
     if len(values) >= 2:
         q1, _, q3 = statistics.quantiles(values, n=4)
@@ -41,12 +69,6 @@ def _percentiles(values):
 
 
 def aggregate(rows):
-    """Aggregate timed rows (warmup=0) into a nested structure:
-
-        {sweep_type: {backend: [ {param, median_ms, p25, p75, median_bytes}, ... ]}}
-
-    Each backend's list is sorted ascending by param.
-    """
     buckets = defaultdict(lambda: defaultdict(lambda: defaultdict(
         lambda: {"lat": [], "bytes": []})))
     for r in rows:
@@ -79,57 +101,110 @@ def aggregate(rows):
     return out
 
 
-_AXIS_LABEL = {
-    "fanout": "fan-out (tweets authored)",
-    "selectivity": "selectivity (% of own tweets matching)",
-    "hop_depth": "hop depth",
-}
-
-
-def _plot_metric(agg, sweep, figures_dir, *, metric, ylabel, fname, logy):
+def _plot_latency(agg, sweep, figures_dir, fname):
     import matplotlib
-    matplotlib.use("Agg")  # headless: no display on clarity
+    matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
-    fig, ax = plt.subplots(figsize=(6.5, 4.2))
-    for backend in sorted(agg[sweep]):
+    fig, ax = plt.subplots(figsize=(7.5, 5.0))
+    fig.patch.set_facecolor("white")
+    ax.set_facecolor("white")
+
+    # draw backends in a consistent order (jac first if present, then pg, sqla, neo4j)
+    order = ["jac", "postgres", "sqlalchemy", "neo4j"]
+    backends_present = list(agg[sweep].keys())
+    ordered = [b for b in order if b in backends_present] + \
+              [b for b in backends_present if b not in order]
+
+    for backend in ordered:
         pts = agg[sweep][backend]
+        style = _BACKEND_STYLE.get(backend, _DEFAULT_STYLE)
         xs = [p["param"] for p in pts]
-        ys = [p[metric] for p in pts]
-        if metric == "median_ms":
-            yerr = [[p["median_ms"] - p["p25"] for p in pts],
-                    [p["p75"] - p["median_ms"] for p in pts]]
-            ax.errorbar(xs, ys, yerr=yerr, marker="o", capsize=3, label=backend)
-        else:
-            ax.plot(xs, ys, marker="o", label=backend)
-    if logy:
-        ax.set_yscale("log")
-    ax.set_xlabel(_AXIS_LABEL.get(sweep, sweep))
-    ax.set_ylabel(ylabel)
-    ax.set_title(f"{sweep} sweep")
-    ax.legend()
-    ax.grid(True, which="both", alpha=0.3)
+        ys = [p["median_ms"] for p in pts]
+        yerr_lo = [p["median_ms"] - p["p25"] for p in pts]
+        yerr_hi = [p["p75"] - p["median_ms"] for p in pts]
+        label = style["label"] or backend
+        ax.errorbar(
+            xs, ys,
+            yerr=[yerr_lo, yerr_hi],
+            label=label,
+            color=style["color"],
+            marker=style["marker"],
+            markersize=7,
+            linewidth=2,
+            capsize=3,
+            capthick=1.2,
+        )
+
+    ax.set_yscale("log")
+    ax.set_xlabel(_AXIS_LABEL.get(sweep, sweep), fontsize=12)
+    ax.set_ylabel("median latency (ms, log)", fontsize=12)
+    ax.set_title(_TITLE.get(sweep, f"{sweep} sweep"), fontsize=13, fontweight="normal")
+    ax.legend(loc="upper left", fontsize=10, framealpha=0.9)
+    ax.grid(True, which="both", color="#cccccc", linewidth=0.6, linestyle="-")
+    ax.set_axisbelow(True)
+
+    caption = _CAPTION.get(sweep, "")
+    if caption:
+        fig.text(0.5, 0.01, caption, ha="center", va="bottom",
+                 fontsize=7.5, style="italic", color="#555555")
+
+    fig.tight_layout(rect=[0, 0.04, 1, 1])
+    out = Path(figures_dir) / fname
+    fig.savefig(out, dpi=150, bbox_inches="tight", facecolor="white")
+    plt.close(fig)
+    return out
+
+
+def _plot_bytes(agg, sweep, figures_dir, fname):
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    fig, ax = plt.subplots(figsize=(7.5, 4.0))
+    fig.patch.set_facecolor("white")
+    ax.set_facecolor("white")
+
+    order = ["jac", "postgres", "sqlalchemy", "neo4j"]
+    backends_present = list(agg[sweep].keys())
+    ordered = [b for b in order if b in backends_present] + \
+              [b for b in backends_present if b not in order]
+
+    for backend in ordered:
+        pts = agg[sweep][backend]
+        style = _BACKEND_STYLE.get(backend, _DEFAULT_STYLE)
+        xs = [p["param"] for p in pts]
+        ys = [p["median_bytes"] for p in pts]
+        ax.plot(xs, ys, label=style["label"] or backend,
+                color=style["color"], marker=style["marker"],
+                markersize=7, linewidth=2)
+
+    ax.set_xlabel(_AXIS_LABEL.get(sweep, sweep), fontsize=12)
+    ax.set_ylabel("median response bytes", fontsize=12)
+    ax.set_title(f"{_TITLE.get(sweep, sweep)} — payload sanity", fontsize=12)
+    ax.legend(loc="upper left", fontsize=10, framealpha=0.9)
+    ax.grid(True, which="both", color="#cccccc", linewidth=0.6)
+    ax.set_axisbelow(True)
+
     fig.tight_layout()
     out = Path(figures_dir) / fname
-    fig.savefig(out, dpi=130)
+    fig.savefig(out, dpi=150, bbox_inches="tight", facecolor="white")
     plt.close(fig)
     return out
 
 
 def render(agg, figures_dir):
-    """Render latency + response_bytes figures for every sweep. Returns paths."""
     Path(figures_dir).mkdir(parents=True, exist_ok=True)
     written = []
-    fig_name = {"fanout": "fig5_fanout", "selectivity": "fig6_selectivity",
-                "hop_depth": "fig7_hop_depth"}
+    fig_name = {
+        "fanout":      "fig5_fanout",
+        "selectivity": "fig6_selectivity",
+        "hop_depth":   "fig7_hop_depth",
+    }
     for sweep in agg:
         base = fig_name.get(sweep, sweep)
-        written.append(_plot_metric(
-            agg, sweep, figures_dir, metric="median_ms",
-            ylabel="median latency (ms)", fname=f"{base}.png", logy=True))
-        written.append(_plot_metric(
-            agg, sweep, figures_dir, metric="median_bytes",
-            ylabel="median response bytes", fname=f"{base}_bytes.png", logy=False))
+        written.append(_plot_latency(agg, sweep, figures_dir, f"{base}.png"))
+        written.append(_plot_bytes(agg, sweep, figures_dir, f"{base}_bytes.png"))
     return written
 
 
