@@ -6,8 +6,8 @@ Do the first run manually; script it only after the sequence is proven.
 **This run:**
 - **Fanout only** — the selectivity sweep is still the filter-pushdown path mislabeled as
   type-selectivity (needs the FP→type refocus). Don't run it for a headline figure yet.
-- Figure = **4 lines** (jac-GTI, postgres, sqla, neo4j). **No naive-jac line yet** — that needs
-  the `JAC_TOPOLOGY_INDEX` toggle fix.
+- Figure = **4 lines** (jac-GTI, postgres, sqla, neo4j). **No naive-jac line yet** — that needs a
+  separate jac deploy with env `JAC_INDEX_ENABLED=false` (the verified GTI toggle).
 - Keep `--run-id run01` across **all 4** backends so their seeded data lines up.
 
 ---

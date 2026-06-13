@@ -175,7 +175,7 @@ The timed CSV schema is frozen. Write `results/{backend}_meta.json` alongside it
   "seed_spec_version": 1, "likes_threshold": 10,
   "warmup": 20, "trials": 30, "sweeps": ["fanout", "selectivity"],
   "started_at": "...", "finished_at": "...",
-  "notes": {"jac_topology_index": "from k8s env JAC_TOPOLOGY_INDEX, record actual value"}
+  "notes": {"jac_index_enabled": "GTI gate = env JAC_INDEX_ENABLED (overrides) else jac.toml topology_index; record actual"}
 }
 ```
 
