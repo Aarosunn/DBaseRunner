@@ -2,31 +2,31 @@
  "likes_threshold": 10,
  "points": [
   {
-   "expected_matching": 5,
+   "expected_matching": 25,
    "file": "fanout_100.json",
    "param_value": 100,
    "sweep_type": "fanout"
   },
   {
-   "expected_matching": 13,
+   "expected_matching": 63,
    "file": "fanout_250.json",
    "param_value": 250,
    "sweep_type": "fanout"
   },
   {
-   "expected_matching": 25,
+   "expected_matching": 125,
    "file": "fanout_500.json",
    "param_value": 500,
    "sweep_type": "fanout"
   },
   {
-   "expected_matching": 38,
+   "expected_matching": 188,
    "file": "fanout_750.json",
    "param_value": 750,
    "sweep_type": "fanout"
   },
   {
-   "expected_matching": 50,
+   "expected_matching": 250,
    "file": "fanout_1000.json",
    "param_value": 1000,
    "sweep_type": "fanout"
@@ -62,5 +62,5 @@
    "sweep_type": "selectivity"
   }
  ],
- "spec_version": 1
+ "spec_version": 2
 }

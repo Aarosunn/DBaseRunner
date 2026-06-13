@@ -16,10 +16,10 @@ import seed_gen
 
 class TestExpectedMatching:
     @pytest.mark.parametrize("n_tweets,expected", [
-        (100, 5), (250, 13), (500, 25), (750, 38), (1000, 50),
+        (100, 25), (250, 63), (500, 125), (750, 188), (1000, 250),
     ])
-    def test_fanout_table_at_5pct(self, n_tweets, expected):
-        assert seed_gen.expected_matching(n_tweets, 5) == expected
+    def test_fanout_table_at_25pct(self, n_tweets, expected):
+        assert seed_gen.expected_matching(n_tweets, 25) == expected
 
     @pytest.mark.parametrize("pct,expected", [
         (10, 100), (25, 250), (50, 500), (75, 750), (100, 1000),
@@ -28,13 +28,22 @@ class TestExpectedMatching:
         assert seed_gen.expected_matching(1000, pct) == expected
 
 
+class TestSeedFloor:
+    def test_lowest_fanout_point_clears_min_target_floor(self):
+        # HARNESS_CONTEXT.md §8: the lowest sweep point must yield >= ~20-30
+        # target nodes, else the result set is too small to be anything but noise.
+        _, _, n_matching = seed_gen.point_dimensions("fanout", 100)
+        assert n_matching >= 20, (
+            f"lowest fanout point yields only {n_matching} matching tweets")
+
+
 class TestPoints:
     def test_ten_points_total(self):
         assert len(seed_gen.points()) == 10
 
-    def test_fanout_points_fix_selectivity_5(self):
+    def test_fanout_points_fix_selectivity_25(self):
         n, pct, _ = seed_gen.point_dimensions("fanout", 250)
-        assert (n, pct) == (250, 5)
+        assert (n, pct) == (250, 25)
 
     def test_selectivity_points_fix_n_1000(self):
         n, pct, _ = seed_gen.point_dimensions("selectivity", 25)
@@ -57,8 +66,8 @@ class TestGeneratePoint:
     def test_exact_matching_count(self):
         spec = seed_gen.generate_point("fanout", 250)
         matching = [t for t in spec["tweets"] if t["like_count"] > seed_gen.LIKES_THRESHOLD]
-        assert len(matching) == 13
-        assert spec["expected_matching"] == 13
+        assert len(matching) == 63
+        assert spec["expected_matching"] == 63
 
     def test_matching_keys_match_actual_matching_tweets(self):
         spec = seed_gen.generate_point("selectivity", 25)
@@ -116,7 +125,7 @@ class TestGeneratePoint:
         assert spec["sweep_type"] == "fanout"
         assert spec["param_value"] == 250
         assert spec["likes_threshold"] == seed_gen.LIKES_THRESHOLD
-        assert spec["selectivity_pct"] == 5
+        assert spec["selectivity_pct"] == 25
         assert spec["eval_user_suffix"] == "fanout_250"
         assert spec["likers"] == seed_gen.LIKER_POOL
 
@@ -151,7 +160,7 @@ class TestWriteAll:
     def test_point_file_roundtrips(self, tmp_path):
         seed_gen.write_all(str(tmp_path))
         spec = json.loads((tmp_path / "fanout_250.json").read_text())
-        assert spec["expected_matching"] == 13
+        assert spec["expected_matching"] == 63
 
     def test_byte_identical_across_runs(self, tmp_path):
         d1 = tmp_path / "a"

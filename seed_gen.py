@@ -14,13 +14,15 @@ import random
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-SPEC_VERSION = 1
+SPEC_VERSION = 2
 LIKES_THRESHOLD = 10              # predicate is like_count > K (§2)
 LIKER_POOL = [f"liker_{i:03d}" for i in range(32)]   # §2: 32 distinct likers suffice
 
 FANOUT_VALUES = [100, 250, 500, 750, 1000]
 SELECTIVITY_VALUES = [10, 25, 50, 75, 100]
-FANOUT_SELECTIVITY_PCT = 5        # fanout sweep fixes selectivity at 5% (§5)
+# fanout sweep fixes selectivity so the lowest point (fanout=100) still yields
+# >= ~20-30 target tweets (HARNESS_CONTEXT.md §8 floor); 25% -> 25 at fanout=100.
+FANOUT_SELECTIVITY_PCT = 25
 SELECTIVITY_N_TWEETS = 1000       # selectivity sweep fixes fan-out at 1000 (§5)
 
 _BASE_TS = datetime(2026, 1, 1, tzinfo=timezone.utc)   # §3: base + 60s*index

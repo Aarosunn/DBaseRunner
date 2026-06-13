@@ -119,7 +119,7 @@ class TestLoadPointSpec:
     def test_reads_existing_spec(self, tmp_path):
         seed_gen.write_all(str(tmp_path))
         spec = harness.load_point_spec(str(tmp_path), "fanout", 250)
-        assert spec["expected_matching"] == 13
+        assert spec["expected_matching"] == 63
 
     def test_missing_spec_system_exits(self, tmp_path):
         with pytest.raises(SystemExit, match="seed spec not found"):
