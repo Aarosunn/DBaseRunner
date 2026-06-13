@@ -159,46 +159,64 @@ curl -s -o /dev/null -w "%{http_code}\n" -X POST http://127.0.0.1:8001/walker/lo
 #   405 = WRONG app on this port (e.g. a stray `jac serve`); find it: ss -tlnp | grep :8001
 
 uv run python harness.py --backend postgres --url http://localhost:8001 \
-    --run-id run01 --sweep fanout selectivity
+    --run-id run01 --sweep fanout
 ```
 > Sanity-check the result CSV: `response_bytes` should grow with `param_value` on the fanout
 > sweep (more tweets seeded → bigger payload). Flat or zero bytes means the seed did not land.
 
-Automated per backend (apply → wait → port-forward → harness → teardown):
-```bash
-./orchestrate.sh --backend postgres --run-id run01   # one backend
-./orchestrate.sh --keep -- --sweep fanout            # keep pods up; pass --sweep to harness
-```
+#### Scripts & port convention
 
-**The three relational/graph backends, full run** (jac deploys separately, see 3.1):
+| Script | Scope | What it does |
+|---|---|---|
+| `./preflight.sh` | **all backends, every session** | kill stray jac servers + port-forwards, check ports `8001`/`8080` free, show pods |
+| `./build.sh <postgres\|neo4j>` | image backends only | build the app image into minikube at the tag the manifest pins (`:v1`) — sqla/jac rejected |
+| `./orchestrate.sh --backend <b>` | the **3 manifest** backends (postgres, sqlalchemy, neo4j) | apply → wait → port-forward → harness → teardown. **Sequential + tears down each before the next** (required: Guaranteed-QoS pods can't overcommit) |
+| `servers/jac/deploy.sh` / `teardown.sh` | jac only | jac self-deploys via `--scale`; reach it on **8080** |
+| `uv run python plot.py` | — | CSVs → figures |
+
+> **Port convention (kept deliberately split):** the 3 manifest backends use **`LOCAL_PORT=8001`**;
+> jac uses **`8080`** (jac-cloud's default, set by `deploy.sh`). They differ on purpose — jac
+> stays *resident* on 8080 (redeploying `--scale` is expensive) while the 3 cycle through 8001,
+> so a single shared port would collide. Don't unify them.
+
+**The three manifest backends — fanout run** (jac runs separately, below):
 ```bash
-# kill any stray host jac dev servers first — they squat LOCAL_PORT and 404 the health check
-pkill -9 -f "jac start"; pkill -f "port-forward"; sleep 1
+./preflight.sh                              # clean slate first
 for b in postgres sqlalchemy neo4j; do
-  LOCAL_PORT=8001 ./orchestrate.sh --backend "$b" --run-id run01
+  LOCAL_PORT=8001 ./orchestrate.sh --backend "$b" --run-id run01 -- --sweep fanout
 done
 ```
-Uses default 20 warmup / 30 trials and both sweeps (fanout + selectivity). If 8001 is still
-held, use `LOCAL_PORT=8090`. Don't use `--keep` across the loop — it leaves the port-forward
-up and the next backend collides on `LOCAL_PORT`.
+Default 20 warmup / 30 trials. **Fanout only** — the selectivity sweep is still the
+filter-pushdown path mislabeled as type-selectivity (see [Known gaps](#known-gaps)); don't run
+it for a headline figure until the FP→type refocus lands. If 8001 is held, use `LOCAL_PORT=8090`.
+Don't use `--keep` across the loop (leaves the port-forward up → next backend collides).
 
-`orchestrate.sh` does NOT deploy jac correctly (its order puts jac first and the manifest is
-broken) — run jac on its own via `servers/jac/deploy.sh` (3.1), then `harness.py --backend jac
---url http://localhost:8080 --run-id run01`. Env knobs: `NAMESPACE`, `LOCAL_PORT`,
-`ROLLOUT_TIMEOUT`, `HEALTH_RETRIES`.
+**jac — deploy, verify isolation (the gate), then run:**
+```bash
+cd servers/jac && ./teardown.sh 2>/dev/null; ./deploy.sh      # native --scale, exposes :8080
+cd ../..
+JAC_BENCH_URL=http://localhost:8080 uv run pytest tests/test_jac_isolation.py -q  # GATE
+# green -> isolation restored, jac data trustworthy:
+uv run python harness.py --backend jac --url http://localhost:8080 --run-id run01 --sweep fanout
+```
+`orchestrate.sh --backend jac` intentionally errors with a pointer to `deploy.sh` (jac is not
+manifest-deployed). Env knobs: `NAMESPACE`, `LOCAL_PORT`, `ROLLOUT_TIMEOUT`, `HEALTH_RETRIES`.
 
-> **Phase 5 requires the SAME `--run-id` across all four backend runs** so the seeded
-> usernames/data line up for cross-system comparison. `orchestrate.sh` enforces this; if you
-> run `harness.py` by hand, pass the same `--run-id` every time.
+> **Phase 5 requires the SAME `--run-id` across all backend runs** so the seeded usernames/data
+> line up for cross-system comparison. Pass the same `--run-id` to orchestrate and to the jac run.
 
 ### 3.4 Plot
 
 ```bash
 uv run python plot.py --results results/ --figures figures/
-# figures/fig5_fanout.png, fig6_selectivity.png  (+ *_bytes.png sanity plots)
+# figures/fig2_fanout.png  (+ fig2_fanout_bytes.png sanity plot)
 ```
-`*_bytes.png` plots `response_bytes` vs param — it should rise with selectivity; a **flat**
-line means the sweep degenerated to identical data (the original no-op-sweep bug).
+Figure naming follows the roster (`figure-roster.md`): **fig1**=DBLOC, **fig2**=Fanout,
+**fig3**=Type-Selectivity, fig4=Latency-vs-DBLOC, fig5=Phase-Breakdown. The current
+`selectivity` sweep emits `figFP_selectivity_provisional.png` — it's the filter-pushdown path,
+**not** the type-selectivity fig3 (which needs the FP→type refocus). `*_bytes.png` plots
+`response_bytes` vs param — it should rise with the param; a **flat** line means the sweep
+degenerated to identical data (the no-op-sweep bug).
 
 ---
 

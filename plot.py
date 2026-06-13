@@ -214,10 +214,15 @@ def _plot_bytes(agg, sweep, figures_dir, fname):
 def render(agg, figures_dir, params=None):
     Path(figures_dir).mkdir(parents=True, exist_ok=True)
     written = []
+    # Roster numbering (figure-roster.md): fig1=DBLOC, fig2=Fanout,
+    # fig3=Type-Selectivity, fig4=Latency-vs-DBLOC, fig5=Phase-Breakdown.
+    # The current `selectivity` sweep is the FILTER-PUSHDOWN path (like_count>10),
+    # NOT the type-selectivity fig3 — that needs the FP->type refocus. So it's
+    # named provisionally until refocused; do not confuse it with fig3.
     fig_name = {
-        "fanout":      "fig5_fanout",
-        "selectivity": "fig6_selectivity",
-        "hop_depth":   "fig7_hop_depth",
+        "fanout":      "fig2_fanout",
+        "selectivity": "figFP_selectivity_provisional",
+        "hop_depth":   "fig_multihop",
     }
     for sweep in agg:
         base = fig_name.get(sweep, sweep)

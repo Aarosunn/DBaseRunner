@@ -69,8 +69,8 @@ class TestRender:
         figs = tmp_path / "figs"
         written = plot.render(agg, str(figs))
         names = {p.name for p in written}
-        assert "fig5_fanout.png" in names
-        assert "fig5_fanout_bytes.png" in names
+        assert "fig2_fanout.png" in names
+        assert "fig2_fanout_bytes.png" in names
         for p in written:
             assert p.exists() and p.stat().st_size > 0
 
