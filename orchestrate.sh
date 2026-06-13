@@ -7,9 +7,13 @@
 # Phase 5 needs the SAME --run-id across all four backends, so a single run_id
 # is generated once here and passed to every harness invocation.
 #
+# Handles the three manifest-based backends (postgres, sqlalchemy, neo4j).
+# jac is NOT orchestrated here — it self-deploys via servers/jac/deploy.sh
+# (jac start --scale); run it separately, then point harness.py at port 8080.
+#
 # Usage:
-#   ./orchestrate.sh                         # all 4 backends, default sweeps
-#   ./orchestrate.sh --backend jac           # one backend
+#   ./orchestrate.sh                         # postgres, sqlalchemy, neo4j; default sweeps
+#   ./orchestrate.sh --backend postgres      # one backend
 #   ./orchestrate.sh --keep                  # don't tear down pods after each run
 #   ./orchestrate.sh --run-id r42 -- --sweep fanout --trials 30
 #                                            # everything after `--` is passed to harness.py
@@ -21,13 +25,13 @@ set -euo pipefail
 cd "$(dirname "$0")"
 
 # ── backend -> app Service/Deployment name (both share the name in these manifests)
+# jac is intentionally absent: it deploys via servers/jac/deploy.sh, not k8s/<b>/.
 declare -A APP=(
-  [jac]=dbaserunner-jac
   [postgres]=postgres-app
   [sqlalchemy]=dbaserunner-sqlalchemy
   [neo4j]=neo4j-app
 )
-ORDER=(jac postgres sqlalchemy neo4j)
+ORDER=(postgres sqlalchemy neo4j)
 
 NAMESPACE="${NAMESPACE:-default}"
 LOCAL_PORT="${LOCAL_PORT:-8000}"
@@ -52,6 +56,13 @@ while [[ $# -gt 0 ]]; do
 done
 
 if [[ -z "$RUN_ID" ]]; then RUN_ID="$(date +%Y%m%d%H%M%S)"; fi
+
+if [[ "$SELECTED" == "jac" ]]; then
+  echo "jac is not orchestrated here — it self-deploys via jac-cloud --scale." >&2
+  echo "  cd servers/jac && ./deploy.sh" >&2
+  echo "  then: uv run python harness.py --backend jac --url http://localhost:8080 --run-id <id>" >&2
+  exit 2
+fi
 
 if [[ "$SELECTED" == "all" ]]; then BACKENDS=("${ORDER[@]}"); else BACKENDS=("$SELECTED"); fi
 
@@ -79,9 +90,9 @@ for b in "${BACKENDS[@]}"; do
   echo ""
   echo "════════════════ ${b} ════════════════"
 
-  # No-build backends (jac, sqlalchemy) ship source via a ConfigMap populated
-  # from the CURRENT repo files; image-based backends (postgres, neo4j) no-op.
-  if [[ "$b" == "jac" || "$b" == "sqlalchemy" ]]; then
+  # No-build sqlalchemy ships source via a ConfigMap populated from the CURRENT
+  # repo files; image-based backends (postgres, neo4j) no-op.
+  if [[ "$b" == "sqlalchemy" ]]; then
     echo "  [1/5] populate src ConfigMap from current source"
     NAMESPACE="$NAMESPACE" ./k8s-configmap.sh "$b"
   fi

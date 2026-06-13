@@ -81,11 +81,14 @@ current repo files by `./k8s-configmap.sh <backend>`.
 |---|---|---|
 | **postgres** | custom app image `dbaserunner/postgres-app:vN` | build into minikube with a **new tag** — see the minikube box below |
 | **neo4j** | custom app image `dbaserunner/neo4j-app:vN` | build into minikube with a **new tag** — see the minikube box below |
-| **jac** | `dbaserunner-jac-src` **ConfigMap** (main.jac + server.jac + jac.toml) | `./k8s-configmap.sh jac` |
+| **jac** | self-deploys via `jac start --scale` (no manifest, no ConfigMap) | re-run `servers/jac/deploy.sh` |
 | **sqlalchemy** | `dbaserunner-sqlalchemy-src` **ConfigMap** | `./k8s-configmap.sh sqlalchemy` |
 
-`orchestrate.sh` runs `k8s-configmap.sh` automatically for jac/sqlalchemy before `apply`. The
-ConfigMap step is per-backend, so deploying one backend never touches another.
+`orchestrate.sh` handles only the three manifest-based backends (postgres, sqlalchemy, neo4j)
+and runs `k8s-configmap.sh` automatically for sqlalchemy before `apply`. **jac is not
+orchestrated** — it deploys natively (see the jac box below), and `orchestrate.sh --backend jac`
+errors out with a pointer to `deploy.sh`. The ConfigMap step is per-backend, so deploying one
+backend never touches another.
 
 > The Phase-4 changes (`like_count`, `seed_tweets`, the `like_count > 10` predicate) are in
 > these files — they are NOT in the running pods until you rebuild the image / re-run

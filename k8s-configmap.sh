@@ -1,20 +1,23 @@
 #!/usr/bin/env bash
 # Populate a backend's source ConfigMap from the CURRENT repo files, so the
-# no-build backends (jac, sqlalchemy) run the latest server code on the cluster.
+# no-build sqlalchemy backend runs the latest server code on the cluster.
 #
 # Image-based backends (postgres, neo4j) ship code in their Docker images and do
 # not use a ConfigMap — this script is a no-op for them.
 #
+# jac is NOT handled here: it deploys natively via `servers/jac/deploy.sh`
+# (jac start --scale), which reads servers/jac/*.jac directly. No ConfigMap.
+#
 # Per-backend by design: populating one backend's ConfigMap never touches another.
 # Called standalone or from orchestrate.sh before `kubectl apply -f k8s/<b>/`.
 #
-# Usage:  ./k8s-configmap.sh <jac|sqlalchemy|postgres|neo4j>
+# Usage:  ./k8s-configmap.sh <sqlalchemy|postgres|neo4j>
 # Env:    NAMESPACE (default: default)
 set -euo pipefail
 cd "$(dirname "$0")"
 
 NAMESPACE="${NAMESPACE:-default}"
-BACKEND="${1:?usage: ./k8s-configmap.sh <jac|sqlalchemy|postgres|neo4j>}"
+BACKEND="${1:?usage: ./k8s-configmap.sh <sqlalchemy|postgres|neo4j>}"
 
 apply_cm() {  # name, then --from-file args
   local name="$1"; shift
@@ -25,11 +28,9 @@ apply_cm() {  # name, then --from-file args
 
 case "$BACKEND" in
   jac)
-    # Whole-file keys; mounted at /src, the initContainer copies them into /app.
-    apply_cm dbaserunner-jac-src \
-      --from-file=servers/jac/main.jac \
-      --from-file=servers/jac/server.jac \
-      --from-file=servers/jac/jac.toml
+    echo "  jac deploys natively via servers/jac/deploy.sh (jac start --scale); "\
+"no ConfigMap. See README §3.1." >&2
+    exit 2
     ;;
   sqlalchemy)
     # Flattened keys remapped to real paths by the manifest's `items:` block.
