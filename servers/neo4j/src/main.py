@@ -149,6 +149,9 @@ def create_channel(body: CreateChannel, request: Request):
 @app.post("/walker/load_own_tweets")
 @app.post("/function/load_own_tweets")
 def load_own_tweets(request: Request):
+    # server_total = handler entry → return (includes in-handler _bearer_username
+    # auth resolve → lands in the residual, fair-timing spec §3).
+    t_entry = time.perf_counter()
     uid = _bearer_username(request)
     cypher = (
         "MATCH (p:Profile {jac_id: $uid})-[:POST]->(t:Tweet) "
@@ -161,7 +164,7 @@ def load_own_tweets(request: Request):
     t0 = time.perf_counter()
     with driver.session() as s:
         rows = s.run(cypher, uid=uid).data()
-    ms_traversal = (time.perf_counter() - t0) * 1000.0
+    ms_fetch = (time.perf_counter() - t0) * 1000.0  # cypher run + .data()
 
     t1 = time.perf_counter()
     tweets = [
@@ -179,12 +182,15 @@ def load_own_tweets(request: Request):
         }
         for r in rows
     ]
-    ms_build = (time.perf_counter() - t1) * 1000.0
+    ms_build = (time.perf_counter() - t1) * 1000.0  # list-comprehension build
 
     report = {
         "tweets": tweets,
-        "ms_traversal": round(ms_traversal, 4),
-        "ms_build_payload": round(ms_build, 4),
+        "server_timing": {
+            "ms_fetch": round(ms_fetch, 4),
+            "ms_build": round(ms_build, 4),
+            "server_total": round((time.perf_counter() - t_entry) * 1000.0, 4),
+        },
     }
     return {"data": {"result": tweets, "reports": [report]}}
 

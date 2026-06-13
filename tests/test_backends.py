@@ -9,6 +9,8 @@ seed() body shape, reset(), clear_cache().
 import json
 from unittest.mock import MagicMock
 
+import pytest
+
 
 from backends import JacBackend, PostgresBackend, SQLAlchemyBackend, Neo4jBackend
 
@@ -290,3 +292,42 @@ class TestResetAndClearCache:
         s = attach(b)
         b.clear_cache()
         s.post.assert_not_called()
+
+
+# ── server-timing extractor (fair-timing spec §5) ────────────────────────────
+
+from backends.base import extract_server_timing
+
+
+class TestExtractServerTiming:
+    def test_pulls_block_from_baseline_envelope(self):
+        body = {"data": {"reports": [{"tweets": [],
+                "server_timing": {"ms_fetch": 1.5, "ms_build": 0.5, "server_total": 2.2}}]}}
+        out = extract_server_timing(body)
+        assert out == {"server_total_ms": 2.2, "ms_fetch": 1.5, "ms_build": 0.5}
+
+    def test_pulls_block_from_jac_envelope(self):
+        # jac-cloud omits the data wrapper: {"reports": [...]}
+        body = {"reports": [{"tweets": [],
+                "server_timing": {"ms_fetch": 3.0, "ms_build": 1.0, "server_total": 4.5}}]}
+        out = extract_server_timing(body)
+        assert out == {"server_total_ms": 4.5, "ms_fetch": 3.0, "ms_build": 1.0}
+
+    @pytest.mark.parametrize("body", [
+        {},                                                   # empty body
+        {"data": {}},                                         # no reports
+        {"data": {"reports": []}},                            # empty reports
+        {"reports": ["notadict"]},                            # reports[0] not a dict
+        {"reports": [{"tweets": []}]},                        # no server_timing
+        {"reports": [{"server_timing": {"ms_fetch": 1}}]},    # missing keys
+        {"reports": [{"server_timing": {"ms_fetch": "x", "ms_build": 0, "server_total": 1}}]},  # non-numeric
+    ])
+    def test_returns_none_on_malformed(self, body):
+        assert extract_server_timing(body) is None
+
+    def test_coerces_int_and_numeric_string_to_float(self):
+        body = {"reports": [{"server_timing":
+                {"ms_fetch": 2, "ms_build": "0.0", "server_total": "2.7"}}]}
+        out = extract_server_timing(body)
+        assert out == {"server_total_ms": 2.7, "ms_fetch": 2.0, "ms_build": 0.0}
+        assert all(isinstance(v, float) for v in out.values())

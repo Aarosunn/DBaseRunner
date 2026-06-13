@@ -8,6 +8,7 @@ HTTP is mocked — no live servers needed. Tests cover:
 
 import csv
 import io
+import time
 import pytest
 from unittest.mock import MagicMock, call
 
@@ -20,6 +21,7 @@ def mock_session(content=b'{"ok": true}'):
     session = MagicMock()
     resp = MagicMock()
     resp.content = content
+    resp.json.return_value = {}          # no server_timing → markers come back None
     session.post.return_value = resp
     return session, resp
 
@@ -32,20 +34,26 @@ def accumulating_writer():
     return writer, rows
 
 
+def trial(latency=10.0, resp_bytes=100, server_total=None, fetch=None, build=None):
+    """A timed_fn return value (the dict timed_call now produces)."""
+    return {"latency_ms": latency, "response_bytes": resp_bytes,
+            "server_total_ms": server_total, "ms_fetch": fetch, "ms_build": build}
+
+
 # ── timed_call ───────────────────────────────────────────────────────────────
 
 class TestTimedCall:
     def test_returns_latency_and_response_bytes(self):
         session, _ = mock_session(content=b"hello world")  # 11 bytes
-        latency_ms, response_bytes = timed_call(session, "http://x/ep", {"k": "v"})
-        assert latency_ms >= 0
-        assert response_bytes == 11
+        r = timed_call(session, "http://x/ep", {"k": "v"})
+        assert r["latency_ms"] >= 0
+        assert r["response_bytes"] == 11
 
     def test_latency_is_milliseconds_not_seconds(self):
         session, _ = mock_session()
-        latency_ms, _ = timed_call(session, "http://x/ep", {})
+        r = timed_call(session, "http://x/ep", {})
         # Mock call takes < 1ms; if we accidentally returned seconds it would be ~0.000001
-        assert latency_ms < 5000
+        assert r["latency_ms"] < 5000
 
     def test_posts_to_correct_url_with_payload(self):
         session, _ = mock_session()
@@ -70,8 +78,99 @@ class TestTimedCall:
 
     def test_empty_body_gives_zero_bytes(self):
         session, _ = mock_session(content=b"")
-        _, response_bytes = timed_call(session, "http://x/ep", {})
-        assert response_bytes == 0
+        r = timed_call(session, "http://x/ep", {})
+        assert r["response_bytes"] == 0
+
+
+# ── timed_call server-timing capture (fair-timing spec §5) ───────────────────
+
+def timing_session(json_body, content=b"x"):
+    session = MagicMock()
+    resp = MagicMock()
+    resp.content = content
+    resp.json.return_value = json_body
+    session.post.return_value = resp
+    return session, resp
+
+
+class TestTimedCallTiming:
+    def test_returns_dict_with_all_keys(self):
+        body = {"data": {"reports": [{"server_timing":
+                {"ms_fetch": 1.0, "ms_build": 0.5, "server_total": 2.0}}]}}
+        session, _ = timing_session(body, content=b"hello")
+        r = timed_call(session, "http://x/ep", {})
+        assert r["latency_ms"] >= 0
+        assert r["response_bytes"] == 5
+        assert r["server_total_ms"] == 2.0
+        assert r["ms_fetch"] == 1.0
+        assert r["ms_build"] == 0.5
+
+    def test_marker_keys_none_when_no_server_timing(self):
+        session, _ = timing_session({"data": {"reports": [{"tweets": []}]}})
+        r = timed_call(session, "http://x/ep", {})
+        assert r["server_total_ms"] is None
+        assert r["ms_fetch"] is None
+        assert r["ms_build"] is None
+
+    def test_marker_keys_none_when_json_raises(self):
+        session = MagicMock()
+        resp = MagicMock()
+        resp.content = b""
+        resp.json.side_effect = ValueError("no json")
+        session.post.return_value = resp
+        r = timed_call(session, "http://x/ep", {})
+        assert r["server_total_ms"] is None
+
+    def test_client_timer_excludes_json_parse(self):
+        # A slow extractor (50ms) runs AFTER the timer stops; latency must not include it.
+        body = {"reports": [{"server_timing":
+                {"ms_fetch": 1, "ms_build": 1, "server_total": 2}}]}
+        session, _ = timing_session(body)
+
+        def slow_extract(b):
+            time.sleep(0.05)
+            return {"server_total_ms": 2.0, "ms_fetch": 1.0, "ms_build": 1.0}
+
+        r = timed_call(session, "http://x/ep", {}, extract_timing=slow_extract)
+        assert r["latency_ms"] < 40  # mock POST is ~instant; 50ms parse must be excluded
+        assert r["server_total_ms"] == 2.0
+
+
+# ── CSV schema: timing columns (fair-timing spec §4) ─────────────────────────
+
+class TestCsvSchemaTimingColumns:
+    def test_fieldnames_include_timing_columns_in_order(self):
+        assert CSV_FIELDNAMES == [
+            "backend", "sweep_type", "param_value", "trial_num",
+            "latency_ms", "server_total_ms", "ms_fetch", "ms_build", "network_ms",
+            "response_bytes", "timestamp", "warmup",
+        ]
+
+
+class TestRunSweepTimingColumns:
+    def _rows(self, **kw):
+        writer, rows = accumulating_writer()
+        timed_fn = MagicMock(return_value=trial(**kw))
+        run_sweep("postgres", "fanout", [500], timed_fn, writer,
+                  warmup_count=1, trials=1, timestamp_fn=lambda: 0.0)
+        return rows
+
+    def test_writes_server_total_fetch_build(self):
+        rows = self._rows(server_total=2.0, fetch=1.5, build=0.5)
+        assert all(r["server_total_ms"] == 2.0 and r["ms_fetch"] == 1.5
+                   and r["ms_build"] == 0.5 for r in rows)
+
+    def test_network_ms_is_client_minus_server(self):
+        rows = self._rows(latency=10.0, server_total=4.0)
+        assert all(r["network_ms"] == 6.0 for r in rows)
+
+    def test_network_ms_blank_when_no_server_total(self):
+        rows = self._rows(latency=10.0, server_total=None)
+        assert all(r["network_ms"] is None for r in rows)
+
+    def test_negative_network_ms_not_clamped(self):
+        rows = self._rows(latency=2.0, server_total=5.0)
+        assert all(r["network_ms"] == -3.0 for r in rows)
 
 
 # ── run_sweep row counts ──────────────────────────────────────────────────────
@@ -79,32 +178,32 @@ class TestTimedCall:
 class TestRunSweepRowCounts:
     def test_single_param_value_produces_warmup_plus_trials(self):
         writer, rows = accumulating_writer()
-        run_sweep("jac", "fanout", [500], MagicMock(return_value=(10.0, 100)), writer,
+        run_sweep("jac", "fanout", [500], MagicMock(return_value=trial()), writer,
                   warmup_count=20, trials=30, timestamp_fn=lambda: 0.0)
         assert len(rows) == 50
 
     def test_multiple_param_values_multiply_rows(self):
         writer, rows = accumulating_writer()
         run_sweep("postgres", "fanout", [100, 250, 500, 750, 1000],
-                  MagicMock(return_value=(10.0, 100)), writer,
+                  MagicMock(return_value=trial()), writer,
                   warmup_count=20, trials=30, timestamp_fn=lambda: 0.0)
         assert len(rows) == 250  # 5 param values × 50
 
     def test_warmup_row_count_per_param_value(self):
         writer, rows = accumulating_writer()
-        run_sweep("jac", "selectivity", [50], MagicMock(return_value=(10.0, 100)), writer,
+        run_sweep("jac", "selectivity", [50], MagicMock(return_value=trial()), writer,
                   warmup_count=20, trials=30, timestamp_fn=lambda: 0.0)
         assert sum(1 for r in rows if r["warmup"] == 1) == 20
 
     def test_timed_row_count_per_param_value(self):
         writer, rows = accumulating_writer()
-        run_sweep("jac", "selectivity", [50], MagicMock(return_value=(10.0, 100)), writer,
+        run_sweep("jac", "selectivity", [50], MagicMock(return_value=trial()), writer,
                   warmup_count=20, trials=30, timestamp_fn=lambda: 0.0)
         assert sum(1 for r in rows if r["warmup"] == 0) == 30
 
     def test_timed_fn_called_warmup_plus_trials_times(self):
         writer, _ = accumulating_writer()
-        timed_fn = MagicMock(return_value=(10.0, 100))
+        timed_fn = MagicMock(return_value=trial())
         run_sweep("jac", "fanout", [500], timed_fn, writer,
                   warmup_count=20, trials=30, timestamp_fn=lambda: 0.0)
         assert timed_fn.call_count == 50
@@ -116,7 +215,7 @@ class TestRunSweepCsvSchema:
     def _rows(self, backend="postgres", sweep_type="fanout", param_value=500,
                latency=42.5, resp_bytes=256, clear_fn=None):
         writer, rows = accumulating_writer()
-        timed_fn = MagicMock(return_value=(latency, resp_bytes))
+        timed_fn = MagicMock(return_value=trial(latency=latency, resp_bytes=resp_bytes))
         run_sweep(backend, sweep_type, [param_value], timed_fn, writer,
                   warmup_count=1, trials=1, clear_fn=clear_fn, timestamp_fn=lambda: 1_700_000_000.0)
         return rows
@@ -157,7 +256,7 @@ class TestRunSweepCsvSchema:
 
     def test_warmup_flag_is_0_for_timed_rows(self):
         writer, rows = accumulating_writer()
-        timed_fn = MagicMock(return_value=(10.0, 100))
+        timed_fn = MagicMock(return_value=trial())
         run_sweep("neo4j", "fanout", [100], timed_fn, writer,
                   warmup_count=2, trials=3, timestamp_fn=lambda: 0.0)
         timed_rows = [r for r in rows if r["warmup"] == 0]
@@ -166,7 +265,7 @@ class TestRunSweepCsvSchema:
 
     def test_timed_fn_receives_param_value_as_argument(self):
         writer, _ = accumulating_writer()
-        timed_fn = MagicMock(return_value=(10.0, 100))
+        timed_fn = MagicMock(return_value=trial())
         run_sweep("jac", "fanout", [750], timed_fn, writer,
                   warmup_count=1, trials=1, timestamp_fn=lambda: 0.0)
         assert all(c == call(750) for c in timed_fn.call_args_list)
@@ -177,21 +276,21 @@ class TestRunSweepCsvSchema:
 class TestRunSweepTrialNum:
     def test_warmup_trial_num_is_sequential_from_zero(self):
         writer, rows = accumulating_writer()
-        run_sweep("jac", "fanout", [500], MagicMock(return_value=(10.0, 100)), writer,
+        run_sweep("jac", "fanout", [500], MagicMock(return_value=trial()), writer,
                   warmup_count=5, trials=3, timestamp_fn=lambda: 0.0)
         warmup_nums = [r["trial_num"] for r in rows if r["warmup"] == 1]
         assert warmup_nums == list(range(5))
 
     def test_timed_trial_num_is_sequential_from_zero(self):
         writer, rows = accumulating_writer()
-        run_sweep("jac", "fanout", [500], MagicMock(return_value=(10.0, 100)), writer,
+        run_sweep("jac", "fanout", [500], MagicMock(return_value=trial()), writer,
                   warmup_count=3, trials=5, timestamp_fn=lambda: 0.0)
         timed_nums = [r["trial_num"] for r in rows if r["warmup"] == 0]
         assert timed_nums == list(range(5))
 
     def test_trial_num_resets_per_param_value(self):
         writer, rows = accumulating_writer()
-        run_sweep("jac", "fanout", [100, 500], MagicMock(return_value=(10.0, 100)), writer,
+        run_sweep("jac", "fanout", [100, 500], MagicMock(return_value=trial()), writer,
                   warmup_count=2, trials=3, timestamp_fn=lambda: 0.0)
         # Each param_value should have timed trial_nums 0,1,2 — not 0,1,2,3,4,5
         timed_rows = [r for r in rows if r["warmup"] == 0]
@@ -207,7 +306,7 @@ class TestRunSweepClearFn:
     def test_clear_fn_called_once_per_timed_trial(self):
         writer, _ = accumulating_writer()
         clear_fn = MagicMock()
-        run_sweep("jac", "fanout", [500], MagicMock(return_value=(10.0, 100)), writer,
+        run_sweep("jac", "fanout", [500], MagicMock(return_value=trial()), writer,
                   warmup_count=20, trials=30, clear_fn=clear_fn, timestamp_fn=lambda: 0.0)
         assert clear_fn.call_count == 30
 
@@ -219,7 +318,7 @@ class TestRunSweepClearFn:
         def tracking_clear():
             clear_call_row_counts.append(len(rows))
 
-        run_sweep("jac", "fanout", [500], MagicMock(return_value=(10.0, 100)), writer,
+        run_sweep("jac", "fanout", [500], MagicMock(return_value=trial()), writer,
                   warmup_count=20, trials=5, clear_fn=tracking_clear, timestamp_fn=lambda: 0.0)
 
         # Every clear call happened after all 20 warmup rows were written
@@ -227,7 +326,7 @@ class TestRunSweepClearFn:
 
     def test_none_clear_fn_does_not_raise(self):
         writer, rows = accumulating_writer()
-        run_sweep("postgres", "fanout", [500], MagicMock(return_value=(10.0, 100)), writer,
+        run_sweep("postgres", "fanout", [500], MagicMock(return_value=trial()), writer,
                   warmup_count=5, trials=5, clear_fn=None, timestamp_fn=lambda: 0.0)
         assert len(rows) == 10
 
@@ -235,7 +334,7 @@ class TestRunSweepClearFn:
         """3 param values × 4 trials = 12 clear calls total."""
         writer, _ = accumulating_writer()
         clear_fn = MagicMock()
-        run_sweep("jac", "fanout", [100, 500, 1000], MagicMock(return_value=(10.0, 100)), writer,
+        run_sweep("jac", "fanout", [100, 500, 1000], MagicMock(return_value=trial()), writer,
                   warmup_count=2, trials=4, clear_fn=clear_fn, timestamp_fn=lambda: 0.0)
         assert clear_fn.call_count == 12
 
@@ -247,7 +346,7 @@ class TestCsvRoundTrip:
         buf = io.StringIO()
         writer = csv.DictWriter(buf, fieldnames=CSV_FIELDNAMES)
         writer.writeheader()
-        timed_fn = MagicMock(return_value=(15.5, 512))
+        timed_fn = MagicMock(return_value=trial(latency=15.5, resp_bytes=512))
         run_sweep("neo4j", "selectivity", [25], timed_fn, writer,
                   warmup_count=2, trials=3, timestamp_fn=lambda: 1_000.0)
         buf.seek(0)

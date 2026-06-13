@@ -306,11 +306,11 @@ def load_own_tweets(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    # Mirrors Jac's `walker load_own_tweets`: returns only the caller's
-    # own tweets (no follow-traversal). Reports server-timed ms_traversal
-    # (SQL round-trip) and ms_build_payload (per-tweet .report()) so the
-    # shared bench driver can separate engine work from ORM serialization.
-    t0 = time.perf_counter()
+    # Mirrors Jac's `walker load_own_tweets`: returns only the caller's own tweets
+    # (no follow-traversal). server_timing (fair-timing spec §3): ms_fetch = SQL
+    # round-trip; ms_build = per-tweet .report() ORM hydration (the tax Jac avoids);
+    # server_total = handler entry → return.
+    t_entry = time.perf_counter()
     tweets = db.execute(
         select(Tweet)
         .where(Tweet.author_id == current_user.id, Tweet.like_count > 10)
@@ -321,7 +321,7 @@ def load_own_tweets(
         )
         .order_by(Tweet.created_at.desc())
     ).unique().scalars().all()
-    ms_traversal = (time.perf_counter() - t0) * 1000
+    ms_fetch = (time.perf_counter() - t_entry) * 1000
 
     t1 = time.perf_counter()
     payload = [t.report() for t in tweets]
@@ -329,8 +329,11 @@ def load_own_tweets(
 
     report = {
         "tweets": payload,
-        "ms_traversal": round(ms_traversal, 4),
-        "ms_build_payload": round(ms_build, 4),
+        "server_timing": {
+            "ms_fetch": round(ms_fetch, 4),
+            "ms_build": round(ms_build, 4),
+            "server_total": round((time.perf_counter() - t_entry) * 1000, 4),
+        },
     }
     return build_response([report], result=payload)
 

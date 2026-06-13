@@ -13,6 +13,12 @@ import harness
 import seed_gen
 
 
+def _trial(latency=1.0, resp_bytes=10):
+    """A timed_fn result dict (timed_call's return shape, fair-timing spec §5)."""
+    return {"latency_ms": latency, "response_bytes": resp_bytes,
+            "server_total_ms": None, "ms_fetch": None, "ms_build": None}
+
+
 # ── run_sweep setup_fn hook (§1.5) ────────────────────────────────────────────
 
 class TestSetupFnHook:
@@ -20,7 +26,7 @@ class TestSetupFnHook:
         writer = MagicMock()
         setup = MagicMock()
         harness.run_sweep("jac", "fanout", [100, 250, 500],
-                          MagicMock(return_value=(1.0, 10)), writer,
+                          MagicMock(return_value=_trial()), writer,
                           warmup_count=1, trials=1, setup_fn=setup,
                           timestamp_fn=lambda: 0.0)
         assert setup.call_count == 3
@@ -36,7 +42,7 @@ class TestSetupFnHook:
             seen.append((pv, len(rows)))
 
         harness.run_sweep("jac", "fanout", [100, 250],
-                          MagicMock(return_value=(1.0, 10)), writer,
+                          MagicMock(return_value=_trial()), writer,
                           warmup_count=2, trials=2, setup_fn=setup,
                           timestamp_fn=lambda: 0.0)
         # point 100 set up at 0 rows; point 250 set up after point 100's 4 rows
@@ -50,7 +56,7 @@ class TestSetupFnHook:
 
         with pytest.raises(RuntimeError, match="seed failed"):
             harness.run_sweep("jac", "fanout", [100],
-                              MagicMock(return_value=(1.0, 10)), writer,
+                              MagicMock(return_value=_trial()), writer,
                               setup_fn=boom, timestamp_fn=lambda: 0.0)
 
     def test_none_setup_fn_keeps_old_behavior(self):
@@ -58,7 +64,7 @@ class TestSetupFnHook:
         writer = MagicMock()
         writer.writerow.side_effect = rows.append
         harness.run_sweep("jac", "fanout", [100],
-                          MagicMock(return_value=(1.0, 10)), writer,
+                          MagicMock(return_value=_trial()), writer,
                           warmup_count=2, trials=3, timestamp_fn=lambda: 0.0)
         assert len(rows) == 5
 

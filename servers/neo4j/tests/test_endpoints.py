@@ -253,3 +253,23 @@ def test_load_own_tweets_deserializes_json_string_comments():
     )
     assert comments[0]["username"] == "alice"
     assert comments[0]["content"] == "great post"
+
+
+# ---------------------------------------------------------------------------
+# load_own_tweets reports the server_timing block (fair-timing spec §3):
+# ms_fetch = cypher run + .data(); ms_build = list-comprehension build.
+# ---------------------------------------------------------------------------
+
+def test_load_own_tweets_reports_server_timing():
+    _mock_session.run.return_value.data.return_value = [
+        {"id": "t1", "content": "hi", "author_username": "testuser",
+         "created_at": "2024-01-01T00:00:00", "like_count": 11, "likes": [], "comments": []}
+    ]
+    with TestClient(app) as client:
+        resp = client.post("/walker/load_own_tweets", headers=_auth())
+    assert resp.status_code == 200
+    st = resp.json()["data"]["reports"][0]["server_timing"]
+    assert isinstance(st["ms_fetch"], float) and st["ms_fetch"] >= 0
+    assert isinstance(st["ms_build"], float) and st["ms_build"] >= 0
+    assert isinstance(st["server_total"], float)
+    assert st["server_total"] + 1e-6 >= st["ms_fetch"] + st["ms_build"]  # invariant

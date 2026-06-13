@@ -30,13 +30,18 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import seed_gen
+from backends.base import extract_server_timing
 
 CSV_FIELDNAMES = [
     "backend",
     "sweep_type",
     "param_value",
     "trial_num",
-    "latency_ms",
+    "latency_ms",        # client_total
+    "server_total_ms",   # handler entry → return (substrate, network-excluded)
+    "ms_fetch",          # server sub-phase (descriptive, NOT cross-comparable)
+    "ms_build",          # server sub-phase (descriptive, NOT cross-comparable)
+    "network_ms",        # = latency_ms − server_total_ms; transport+framework+AUTH; provisional
     "response_bytes",
     "timestamp",
     "warmup",
@@ -65,17 +70,57 @@ WARMUP_COUNT = 20
 _KEY_RE = re.compile(r"^\[(t_\d+)\]")
 
 
-def timed_call(session, url, payload):
+def timed_call(session, url, payload, extract_timing=extract_server_timing):
     """Client-side perf_counter wrapping the full HTTP POST.
 
-    Returns (latency_ms: float, response_bytes: int).
-    raise_for_status is outside the timer — pure Python, no I/O.
+    Returns a dict (fair-timing spec §5):
+        latency_ms, response_bytes,
+        server_total_ms, ms_fetch, ms_build   (None if the server emits no
+                                                parseable server_timing block)
+    `latency_ms` = client_total. raise_for_status AND the JSON parse for the
+    server-timing block both happen AFTER t1 — neither pollutes the client timer.
     """
     t0 = time.perf_counter()
     resp = session.post(url, json=payload)
     t1 = time.perf_counter()
     resp.raise_for_status()
-    return (t1 - t0) * 1000, len(resp.content)
+    latency_ms = (t1 - t0) * 1000
+    try:
+        timing = extract_timing(resp.json())
+    except ValueError:                       # malformed JSON body
+        timing = None
+    return {
+        "latency_ms": latency_ms,
+        "response_bytes": len(resp.content),
+        "server_total_ms": timing["server_total_ms"] if timing else None,
+        "ms_fetch": timing["ms_fetch"] if timing else None,
+        "ms_build": timing["ms_build"] if timing else None,
+    }
+
+
+def _trial_row(backend_name, sweep_type, param_value, trial_num, result, timestamp, warmup):
+    """Build one CSV row from a timed_fn result dict (fair-timing spec §4).
+
+    network_ms = latency_ms − server_total_ms; negatives preserved (NOT clamped),
+    blank when the server emitted no server_timing.
+    """
+    server_total = result["server_total_ms"]
+    network_ms = (round(result["latency_ms"] - server_total, 3)
+                  if server_total is not None else None)
+    return {
+        "backend": backend_name,
+        "sweep_type": sweep_type,
+        "param_value": param_value,
+        "trial_num": trial_num,
+        "latency_ms": round(result["latency_ms"], 3),
+        "server_total_ms": server_total,
+        "ms_fetch": result["ms_fetch"],
+        "ms_build": result["ms_build"],
+        "network_ms": network_ms,
+        "response_bytes": result["response_bytes"],
+        "timestamp": timestamp,
+        "warmup": warmup,
+    }
 
 
 def run_sweep(
@@ -96,7 +141,8 @@ def run_sweep(
         backend_name:  string label written to every row (e.g. "jac")
         sweep_type:    "fanout" | "selectivity"
         param_values:  list of parameter values to sweep over
-        timed_fn:      callable(param_value) -> (latency_ms, response_bytes)
+        timed_fn:      callable(param_value) -> result dict (timed_call's return:
+                       latency_ms, response_bytes, server_total_ms, ms_fetch, ms_build)
         writer:        csv.DictWriter — must already have headers written
         warmup_count:  requests fired before timed trials (warmup=1 rows)
         trials:        timed requests per param_value (warmup=0 rows)
@@ -115,32 +161,18 @@ def run_sweep(
             setup_fn(param_value)
 
         for i in range(warmup_count):
-            latency_ms, response_bytes = timed_fn(param_value)
-            writer.writerow({
-                "backend": backend_name,
-                "sweep_type": sweep_type,
-                "param_value": param_value,
-                "trial_num": i,
-                "latency_ms": round(latency_ms, 3),
-                "response_bytes": response_bytes,
-                "timestamp": timestamp_fn(),
-                "warmup": 1,
-            })
+            result = timed_fn(param_value)
+            writer.writerow(
+                _trial_row(backend_name, sweep_type, param_value, i, result,
+                           timestamp_fn(), warmup=1))
 
         for i in range(trials):
             if clear_fn is not None:
                 clear_fn()
-            latency_ms, response_bytes = timed_fn(param_value)
-            writer.writerow({
-                "backend": backend_name,
-                "sweep_type": sweep_type,
-                "param_value": param_value,
-                "trial_num": i,
-                "latency_ms": round(latency_ms, 3),
-                "response_bytes": response_bytes,
-                "timestamp": timestamp_fn(),
-                "warmup": 0,
-            })
+            result = timed_fn(param_value)
+            writer.writerow(
+                _trial_row(backend_name, sweep_type, param_value, i, result,
+                           timestamp_fn(), warmup=0))
 
 
 # ── seed/verify control plane (untimed) ───────────────────────────────────────

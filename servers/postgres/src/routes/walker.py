@@ -483,11 +483,16 @@ def create_channel(
 # ---------------------------------------------------------------------------
 # load_own_tweets — THE benchmarked endpoint. Locked response schema:
 #   {"data": {"result": [...tweets], "reports": [{"tweets": [...],
-#             "ms_traversal": float, "ms_build_payload": 0.0}]}}
+#             "server_timing": {"ms_fetch": float, "ms_build": float,
+#                               "server_total": float}}]}}
+# Fair-timing spec §3: ms_fetch = json_agg SQL round-trip; ms_build = 0.0
+# (PG builds the JSON payload in-SQL, inside ms_fetch — NOT "for free");
+# server_total = handler entry → return.
 # ---------------------------------------------------------------------------
 
 @router.post("/load_own_tweets")
 def load_own_tweets(current_user: dict = Depends(get_current_user)):
+    t_entry = time.perf_counter()
     sql = """
         SELECT COALESCE(json_agg(
             json_build_object(
@@ -519,12 +524,15 @@ def load_own_tweets(current_user: dict = Depends(get_current_user)):
     with db.conn() as c, c.cursor() as cur:
         cur.execute(sql, (current_user["id"],))
         row = cur.fetchone()
-    ms_traversal = (time.perf_counter() - t0) * 1000
+    ms_fetch = (time.perf_counter() - t0) * 1000  # json_agg round-trip (builds payload in-SQL)
     tweets = row["tweets"] or []
     report = {
         "tweets": tweets,
-        "ms_traversal": round(ms_traversal, 4),
-        "ms_build_payload": 0.0,
+        "server_timing": {
+            "ms_fetch": round(ms_fetch, 4),
+            "ms_build": 0.0,  # PG builds the payload in-SQL, inside ms_fetch
+            "server_total": round((time.perf_counter() - t_entry) * 1000, 4),
+        },
     }
     return build_response([report], result=tweets)
 

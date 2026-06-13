@@ -80,6 +80,28 @@ class TestRender:
         rows = plot.read_results(str(tmp_path))
         assert all(r["backend"] == "jac" for r in rows)
 
+    def test_renders_on_new_timing_schema(self, tmp_path):
+        # plot must tolerate the fair-timing columns (server_total_ms/ms_fetch/
+        # ms_build/network_ms) — DictReader ignores extras; latency plots unchanged.
+        fields = ["backend", "sweep_type", "param_value", "trial_num",
+                  "latency_ms", "server_total_ms", "ms_fetch", "ms_build",
+                  "network_ms", "response_bytes", "timestamp", "warmup"]
+        with open(tmp_path / "postgres.csv", "w", newline="") as f:
+            w = csv.DictWriter(f, fieldnames=fields)
+            w.writeheader()
+            for param in (100, 250):
+                for v in (1.0, 2.0, 3.0):
+                    w.writerow({"backend": "postgres", "sweep_type": "fanout",
+                                "param_value": param, "trial_num": 0, "latency_ms": v,
+                                "server_total_ms": 2.0, "ms_fetch": 1.5, "ms_build": 0.5,
+                                "network_ms": v - 2.0, "response_bytes": 100 * param,
+                                "timestamp": 0.0, "warmup": 0})
+        agg = plot.aggregate(plot.read_results(str(tmp_path)))
+        written = plot.render(agg, str(tmp_path / "figs"))
+        assert agg["fanout"]["postgres"]
+        for p in written:
+            assert p.exists() and p.stat().st_size > 0
+
 
 class TestCaption:
     """H3: caption must reflect the actual run (from _meta.json), not a

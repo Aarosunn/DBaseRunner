@@ -59,6 +59,26 @@ def seed_tweets_payload(spec: dict) -> dict:
     }
 
 
+def extract_server_timing(body: dict):
+    """Pull {server_total_ms, ms_fetch, ms_build} from a load_own_tweets response.
+
+    Best-effort, NOT fail-closed (timing is measurement; the Phase-5 content oracle
+    is the fail-closed one). Returns None on any missing/malformed shape.
+    """
+    reports = (body.get("data") or {}).get("reports") or body.get("reports") or []
+    if not reports or not isinstance(reports[0], dict):
+        return None
+    st = reports[0].get("server_timing")
+    if not isinstance(st, dict):
+        return None
+    try:
+        return {"server_total_ms": float(st["server_total"]),
+                "ms_fetch": float(st["ms_fetch"]),
+                "ms_build": float(st["ms_build"])}
+    except (KeyError, TypeError, ValueError):
+        return None
+
+
 class BackendBase(ABC):
     def __init__(self, base_url: str):
         self.base_url = base_url.rstrip("/")

@@ -108,10 +108,12 @@ def test_load_own_tweets_empty(client, registered_user):
     assert len(reports) == 1
     r = reports[0]
     assert "tweets" in r
-    assert "ms_traversal" in r
-    assert "ms_build_payload" in r
-    assert isinstance(r["ms_traversal"], float)
-    assert isinstance(r["ms_build_payload"], float)
+    # server_timing block (fair-timing spec §3): ms_build = .report() ORM hydration tax
+    st = r["server_timing"]
+    assert isinstance(st["ms_fetch"], float) and st["ms_fetch"] >= 0
+    assert isinstance(st["ms_build"], float) and st["ms_build"] >= 0
+    assert isinstance(st["server_total"], float)
+    assert st["server_total"] + 1e-6 >= st["ms_fetch"] + st["ms_build"]  # invariant
 
 def test_load_own_tweets_applies_like_count_predicate(client, registered_user):
     # load_own_tweets now applies the benchmark predicate like_count > 10 server-side
