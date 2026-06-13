@@ -1,0 +1,409 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>JacDB — Harness Rebuild Next Steps</title>
+<style>
+  :root{
+    --bg:#0e1116; --panel:#161b22; --panel2:#1c232d; --ink:#e6edf3; --mut:#9aa7b4;
+    --line:#2a323c; --accent:#5aa9ff; --good:#3fb950; --bad:#f85149; --warn:#d29922;
+    --unk:#8b949e; --purple:#bc8cff;
+    --mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+    --sans:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.65 var(--sans)}
+  .wrap{display:grid;grid-template-columns:260px 1fr;min-height:100vh}
+  nav{position:sticky;top:0;align-self:start;height:100vh;overflow:auto;padding:22px 16px;
+      border-right:1px solid var(--line);background:var(--panel)}
+  nav h1{font-size:15px;margin:0 0 2px;letter-spacing:.2px}
+  nav .sub{color:var(--mut);font-size:12px;margin-bottom:16px}
+  nav a{display:block;color:var(--mut);text-decoration:none;padding:5px 9px;border-radius:6px;font-size:13px}
+  nav a:hover{background:var(--panel2);color:var(--ink)}
+  nav .phase-n{display:inline-block;width:20px;color:var(--accent);font-family:var(--mono);font-size:11px}
+  nav .par-badge{float:right;font-size:10px;background:rgba(90,169,255,.15);color:var(--accent);
+    padding:1px 5px;border-radius:4px;font-family:var(--mono)}
+  main{padding:34px 46px;max-width:1020px}
+  h2{font-size:22px;margin:40px 0 12px;padding-top:10px;border-top:1px solid var(--line)}
+  h2:first-of-type{border:0;margin-top:6px}
+  h3{font-size:15px;color:var(--accent);margin:20px 0 8px}
+  p{color:var(--ink)} .mut{color:var(--mut)}
+  a{color:var(--accent)}
+  code{font-family:var(--mono);background:var(--panel2);padding:1px 6px;border-radius:5px;font-size:12.5px}
+  pre{background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:14px 16px;
+      overflow-x:auto;font-family:var(--mono);font-size:12.5px;line-height:1.5}
+  .pill{display:inline-block;font-size:11px;font-weight:600;padding:2px 9px;border-radius:999px;font-family:var(--mono)}
+  .p-good{background:rgba(63,185,80,.15);color:var(--good)}
+  .p-bad{background:rgba(248,81,73,.15);color:var(--bad)}
+  .p-warn{background:rgba(210,153,34,.16);color:var(--warn)}
+  .p-acc{background:rgba(90,169,255,.15);color:var(--accent)}
+  .p-par{background:rgba(188,140,255,.15);color:var(--purple)}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:18px 22px;margin:14px 0}
+  .grid{display:grid;gap:12px}.cols-2{grid-template-columns:1fr 1fr}.cols-3{grid-template-columns:repeat(3,1fr)}
+  .stat{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px;text-align:center}
+  .stat .n{font-size:26px;font-weight:700;font-family:var(--mono)}
+  .stat .l{font-size:11px;color:var(--mut);text-transform:uppercase;letter-spacing:.4px;margin-top:2px}
+  table{border-collapse:collapse;width:100%;margin:12px 0;font-size:13px}
+  th,td{border:1px solid var(--line);padding:8px 10px;text-align:left;vertical-align:top}
+  th{background:var(--panel2);color:var(--mut);font-weight:600}
+  tr:nth-child(even) td{background:rgba(255,255,255,.012)}
+  .phase{display:flex;gap:16px;margin:18px 0;align-items:flex-start}
+  .phase .num{flex:0 0 42px;height:42px;border-radius:50%;background:var(--panel2);border:2px solid var(--accent);
+    color:var(--accent);font-family:var(--mono);font-weight:700;display:flex;align-items:center;justify-content:center;font-size:16px}
+  .phase .num.par{border-color:var(--purple);color:var(--purple)}
+  .phase .body{flex:1;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:16px 20px}
+  .phase .body h3{margin-top:0;color:var(--ink);font-size:16px}
+  .phase .body .sub{font-size:12px;color:var(--mut);font-family:var(--mono);margin-bottom:12px}
+  .callout{border-left:3px solid var(--accent);background:var(--panel2);padding:12px 16px;
+            border-radius:0 8px 8px 0;margin:12px 0;font-size:14px}
+  .callout.warn{border-color:var(--warn)}
+  .callout.good{border-color:var(--good)}
+  .callout.purple{border-color:var(--purple)}
+  ul.tight{margin:7px 0;padding-left:20px} ul.tight li{margin:5px 0;font-size:14px}
+  .fix-tag{display:inline-block;font-size:10px;font-family:var(--mono);padding:1px 6px;border-radius:4px;
+           margin-left:6px;background:rgba(248,81,73,.15);color:var(--bad)}
+  .new-tag{display:inline-block;font-size:10px;font-family:var(--mono);padding:1px 6px;border-radius:4px;
+           margin-left:6px;background:rgba(63,185,80,.15);color:var(--good)}
+  .decisions{display:grid;gap:10px;margin:14px 0}
+  .dec{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:12px 16px;font-size:13px}
+  .dec .key{color:var(--accent);font-family:var(--mono);font-size:12px;margin-bottom:4px}
+  .timeline{position:relative;padding-left:24px}
+  .timeline::before{content:'';position:absolute;left:8px;top:8px;bottom:8px;width:2px;background:var(--line)}
+  .tl-item{position:relative;margin:0 0 6px}
+  .tl-item::before{content:'';position:absolute;left:-20px;top:7px;width:8px;height:8px;
+    border-radius:50%;background:var(--accent);border:2px solid var(--bg)}
+  .tl-item.par::before{background:var(--purple)}
+  .tl-item.dep::before{background:var(--mut)}
+</style>
+</head>
+<body>
+<div class="wrap">
+<nav>
+  <h1>Harness Rebuild</h1>
+  <div class="sub">JacDB · Next Steps</div>
+  <a href="#overview"><span class="phase-n">▸</span> Overview</a>
+  <a href="#decisions"><span class="phase-n">▸</span> Key Decisions</a>
+  <a href="#fixes"><span class="phase-n">▸</span> Inconsistencies Fixed</a>
+  <a href="#p1"><span class="phase-n">1</span> Explore Clarity</a>
+  <a href="#p2"><span class="phase-n">2</span> Standardize Backends <span class="par-badge">‖ PAR</span></a>
+  <a href="#p3"><span class="phase-n">3</span> Build Harness <span class="par-badge">‖ PAR</span></a>
+  <a href="#p4"><span class="phase-n">4</span> Fix Measurement</a>
+  <a href="#p45"><span class="phase-n">4.5</span> Multi-hop Benchmark</a>
+  <a href="#p5"><span class="phase-n">5</span> Correctness Validation</a>
+  <a href="#p6"><span class="phase-n">6</span> PG jac-scale Backend</a>
+  <a href="#structure"><span class="phase-n">▸</span> Repo Structure</a>
+  <a href="#clarity"><span class="phase-n">▸</span> Clarity Setup</a>
+</nav>
+<main>
+
+<h2 id="overview">Overview</h2>
+<p>The existing benchmark harness has 21 confirmed measurement inconsistencies that make Jac vs baseline comparisons unreliable. This plan rebuilds the harness from scratch with correct methodology, unified measurement, and automated figure generation.</p>
+
+<div class="grid cols-3">
+  <div class="stat"><div class="n" style="color:var(--bad)">21</div><div class="l">Inconsistencies Fixed</div></div>
+  <div class="stat"><div class="n" style="color:var(--accent)">4</div><div class="l">Backends Unified</div></div>
+  <div class="stat"><div class="n" style="color:var(--good)">1</div><div class="l">Harness for All</div></div>
+</div>
+
+<div class="callout warn">
+  <strong>Naive Jac IS included — as a reference line.</strong> Reversed from the original plan: the index-OFF (adj-list) Jac is plotted on the <em>Fanout</em> figure as a labeled reference (it rises with fan-out while GTI-Jac stays flat) — the GTI ablation, run via a <code>JAC_INDEX_ENABLED</code> toggle. Only optimized Jac is a cross-backend competitor; naive-Jac is a Jac-vs-Jac reference, never plotted against warm baselines.
+</div>
+
+<div class="callout purple">
+  <strong>Parallel phases:</strong> Phase 2 (backend standardization) and Phase 3 (harness skeleton) can run simultaneously. Phase 6 (PostgreSQL jac-scale) is fully independent and can start any time.
+</div>
+
+<div class="callout warn">
+  <strong>⚠ Major update — 2026-06-13.</strong> This plan predates several corrections. Authoritative current methodology lives in <code>HARNESS_CONTEXT.md</code> (this folder). Key reframes that supersede parts below:
+  <ul class="tight">
+    <li><strong>Selectivity = TYPE selectivity, not filter pushdown.</strong> Fetch X% target-type nodes from a mixed-type neighborhood. FP (<code>like_count&gt;k</code>) is a separate future test. The "selectivity axis" fix row below is superseded.</li>
+    <li><strong>Fair type selectivity needs a mixed-type neighborhood</strong> each backend discriminates natively — TWO conditions: optimized (TPT / Neo4j edge-type / Jac GTI) = primary, and STI (single table + discriminator + index) = contrast. The (optimized − STI) latency delta = developer overhead, paired with the DBLOC figure.</li>
+    <li><strong>Timing = client total (in-cluster pod → Service, NOT port-forward) + server per-phase breakdown</strong> (auth/query/fetch/build) + <code>network = client − server</code>. Not "client only, no server fields."</li>
+    <li><strong>Payload is now full</strong> (content + likes + comments), not IDs-only; <code>response_bytes</code> guards parity.</li>
+    <li><strong>Figure roster (locked):</strong> DBLOC · Fanout (+naive-jac line) · Type-Selectivity · Latency-vs-DBLOC · Phase-Breakdown. Multi-hop + Filter-Pushdown → future.</li>
+    <li><strong>Backend:</strong> MongoDB now; re-run all figs on Postgres-L3 once built. <strong>Write-heavy workload</strong> = near-future priority (the GTI is built at write time → a read-only benchmark hides its cost).</li>
+    <li><strong>Blocker:</strong> jac root-isolation bug under <code>--scale</code> — fix before trusting any Jac number.</li>
+  </ul>
+</div>
+
+<h2 id="decisions">Key Decisions</h2>
+<div class="decisions">
+  <div class="dec"><div class="key">TIMING</div><strong>Updated:</strong> both — client-side <code>perf_counter</code> from an in-cluster pod → Service (NOT port-forward) as the identical boundary, PLUS server-side per-phase markers (auth/query/fetch/build). <code>network = client − server</code>. Primary substrate metric = server_total; report client + network too. See HARNESS_CONTEXT.md §5.</div>
+  <div class="dec"><div class="key">CACHE</div>All warm. Run 20 warmup requests per config before timing. No <code>clear_cache</code> between trials. Redis L2 is Jac's architecture — measure it as designed.</div>
+  <div class="dec"><div class="key">WARMUP</div>20 warmup requests per config point, uniform across all backends. Replaces: 1 cold warmup (Jac) vs 3 primer configs + 20 warmups (baselines).</div>
+  <div class="dec"><div class="key">FRAMEWORK</div>All backends on FastAPI. SQLAlchemy + hand-tuned Postgres migrate from Flask.</div>
+  <div class="dec"><div class="key">DEPLOYMENT</div>Kubernetes on clarity. All backends as pods. Same container topology.</div>
+  <div class="dec"><div class="key">JAC VERSION</div><strong>Corrected:</strong> GTI/FP logic lives on <code>cse584-W26/jaseci@filter_pushdown</code>. Whether it's fully merged into <code>main</code> is UNSURE. PyPI 0.13.5 ships the topology source but never reads <code>JAC_INDEX_ENABLED</code> → the ON/OFF toggle is a no-op on PyPI; use the branch build and verify the running pod has the index active.</div>
+  <div class="dec"><div class="key">DATA</div>Per-trial raw CSV committed. No pre-aggregation in harness. <code>plot.py</code> computes medians + p25/p75.</div>
+  <div class="dec"><div class="key">POSTGRES JAC BACKEND</div>Phase 6 only. Not a blocker for benchmark runs.</div>
+</div>
+
+<h2 id="fixes">Inconsistencies Fixed by New Harness</h2>
+<table>
+  <tr><th>Inconsistency</th><th>Old Behavior</th><th>Fix</th></tr>
+  <tr><td>Two different harness scripts</td><td>Jac uses bench_evaluation.py, baselines use bench_own_tweets_selectivity.py</td><td>One harness.py for all backends</td></tr>
+  <tr><td>Different endpoints</td><td>Jac: bench_feed walker; baselines: load_own_tweets</td><td>All backends expose load_own_tweets</td></tr>
+  <tr><td>Timer start point</td><td>Jac starts after user located; baselines include user-locate</td><td>Client-side timer wraps full HTTP request</td></tr>
+  <tr><td>Payload scope</td><td>Jac returns ID strings only; baselines return full objects</td><td>Identical payload definition on all backends</td></tr>
+  <tr><td>DB connection in timer</td><td>Per-call connection checkout inside baseline timer; Jac uses persistent session</td><td>Client-side timer is connection-agnostic</td></tr>
+  <tr><td>Cache warm/cold</td><td>Jac cold every trial; baselines warm</td><td>All warm — consistent 20-request warmup</td></tr>
+  <tr><td>Warmup count</td><td>Jac: 1 (then destroyed); baselines: 3 primer configs + 20 warmups</td><td>20 warmup requests, uniform, no destruction</td></tr>
+  <tr><td>Selectivity axis semantics</td><td>Jac: n_tweets/1000; baselines: actual query selectivity %</td><td>Single defined sweep parameter, same meaning for all</td></tr>
+  <tr><td>PG build time hardcoded zero</td><td>PostgreSQL build time set to 0, folded into traversal</td><td>Client-side timer captures real end-to-end cost</td></tr>
+  <tr><td>No cross-system correctness</td><td>Each backend verified only against itself</td><td>Phase 5: result sets compared across all backends</td></tr>
+  <tr><td>No per-trial raw data</td><td>Only pre-aggregated medians committed</td><td>One CSV row per trial, always committed</td></tr>
+  <tr><td>Framework inconsistency</td><td>SQLAlchemy + PG on Flask; Neo4j + Jac on FastAPI</td><td>All FastAPI</td></tr>
+  <tr><td>IPC / co-location asymmetry</td><td>Jac pod topology undocumented; baselines 2-pod</td><td>All backends same k8s topology: app pod + DB pod</td></tr>
+</table>
+
+<h2 id="p1">Phase 1 — Explore Clarity</h2>
+<div class="phase">
+  <div class="num">1</div>
+  <div class="body">
+    <h3>Inventory what's running</h3>
+    <div class="sub">sequential · ~1 hour · must complete before Phase 2</div>
+    <ul class="tight">
+      <li>SSH into clarity</li>
+      <li>Run <code>kubectl get pods</code> and <code>kubectl get services</code> — note all service URLs and ports</li>
+      <li>Run <code>jac --version</code> — verify jaclang installed, note version</li>
+      <li>Check which backends are already deployed from previous run</li>
+      <li>Run <code>python3 --version</code>, <code>docker --version</code></li>
+      <li>Confirm <code>topology_index = true</code> is in littleX_FULLSTACK/jac.toml</li>
+    </ul>
+    <pre>kubectl get pods -A
+kubectl get services -A
+jac --version
+python3 -c "import jaclang; print(jaclang.__version__)"</pre>
+  </div>
+</div>
+
+<h2 id="p2">Phase 2 — Standardize Backends <span class="pill p-par">‖ PARALLEL</span></h2>
+<p class="mut">All 4 backend tasks are independent. Run with Fable in parallel. Harness skeleton (Phase 3) can also start during this phase.</p>
+
+<div class="phase">
+  <div class="num par">2a</div>
+  <div class="body">
+    <h3>Jac FULLSTACK</h3>
+    <div class="sub">parallel · jac-scale already FastAPI</div>
+    <ul class="tight">
+      <li>Add <code>POST /load_own_tweets</code> walker to server.jac — must match baseline endpoint signature exactly <span class="new-tag">NEW</span></li>
+      <li>Add <code>GET /health</code> walker <span class="new-tag">NEW</span></li>
+      <li>Verify <code>topology_index = true</code> in jac.toml</li>
+      <li>Write k8s deployment YAML</li>
+      <li>Remove frontend (not needed for benchmark)</li>
+    </ul>
+    <div class="callout warn">load_own_tweets must return identical fields to all other backends — agree on response schema first.</div>
+  </div>
+</div>
+
+<div class="phase">
+  <div class="num par">2b</div>
+  <div class="body">
+    <h3>Hand-tuned Postgres</h3>
+    <div class="sub">parallel · Flask → FastAPI migration</div>
+    <ul class="tight">
+      <li>Migrate Flask → FastAPI <span class="fix-tag">FIX</span></li>
+      <li>Keep existing hand-written SQL — it's good</li>
+      <li>Add <code>GET /health</code> <span class="new-tag">NEW</span></li>
+      <li>Write Dockerfile + k8s deployment YAML</li>
+      <li>Verify load_own_tweets response matches agreed schema</li>
+    </ul>
+  </div>
+</div>
+
+<div class="phase">
+  <div class="num par">2c</div>
+  <div class="body">
+    <h3>SQLAlchemy</h3>
+    <div class="sub">parallel · Flask → FastAPI migration</div>
+    <ul class="tight">
+      <li>Migrate Flask → FastAPI <span class="fix-tag">FIX</span></li>
+      <li>Add <code>GET /health</code> <span class="new-tag">NEW</span></li>
+      <li>Write Dockerfile + k8s deployment YAML</li>
+      <li>Verify load_own_tweets response matches agreed schema</li>
+    </ul>
+  </div>
+</div>
+
+<div class="phase">
+  <div class="num par">2d</div>
+  <div class="body">
+    <h3>Neo4j HTTP Wrapper</h3>
+    <div class="sub">parallel · already FastAPI</div>
+    <ul class="tight">
+      <li>Add 5 missing endpoints (audit found Neo4j wrapper missing them) <span class="fix-tag">FIX</span></li>
+      <li>Add <code>GET /health</code> <span class="new-tag">NEW</span></li>
+      <li>Write k8s deployment YAML</li>
+      <li>Verify load_own_tweets response matches agreed schema</li>
+    </ul>
+  </div>
+</div>
+
+<h2 id="p3">Phase 3 — Build Unified Harness <span class="pill p-par">‖ PARALLEL WITH P2</span></h2>
+<div class="phase">
+  <div class="num par">3</div>
+  <div class="body">
+    <h3>One harness for all backends</h3>
+    <div class="sub">can start during Phase 2 · Python</div>
+
+    <h3>File structure</h3>
+    <pre>littleX/benchmark/
+  harness.py              # client-side perf_counter timing, -u URL, -r trials, --sweep
+  backends/
+    base.py               # abstract: auth(), load_own_tweets(), health(), seed()
+    jac.py                # Jac adapter
+    postgres.py           # hand-tuned Postgres adapter
+    sqlalchemy.py         # SQLAlchemy adapter
+    neo4j.py              # Neo4j adapter
+  k8s/                    # deployment YAMLs per backend
+    jac/
+    postgres/
+    sqlalchemy/
+    neo4j/
+  orchestrate.sh          # deploy → wait for health → run harness → teardown → next
+  results/                # raw per-trial CSVs committed here — never pre-aggregated
+  plot.py                 # reads results/, outputs figures/ with error bars</pre>
+
+    <h3>Timing protocol</h3>
+    <pre>import time, requests
+
+def timed_call(session, url, payload):
+    t0 = time.perf_counter()
+    resp = session.post(url, json=payload)
+    t1 = time.perf_counter()
+    resp.raise_for_status()
+    return (t1 - t0) * 1000  # ms</pre>
+
+    <h3>Sweep parameters</h3>
+    <table>
+      <tr><th>Sweep</th><th>Values</th><th>Trials per point</th><th>Warmup</th></tr>
+      <tr><td>Fan-out (Fig 5)</td><td>100, 250, 500, 750, 1000 followees</td><td>30</td><td>20 requests</td></tr>
+      <tr><td>Selectivity (Fig 6)</td><td>10, 25, 50, 75, 100%</td><td>30</td><td>20 requests</td></tr>
+      <tr><td>Multi-hop depth (Fig 7)</td><td>1, 2, 3 hops</td><td>30</td><td>20 requests</td></tr>
+    </table>
+
+    <h3>CSV output schema (one row per trial)</h3>
+    <pre>backend, sweep_type, param_value, trial_num, latency_ms, timestamp, warmup</pre>
+    <p class="mut">warmup=1 marks warmup rows, warmup=0 marks timed rows. Both committed. Aggregation in plot.py only.</p>
+  </div>
+</div>
+
+<h2 id="p4">Phase 4 — Fix Measurement Inconsistencies</h2>
+<div class="phase">
+  <div class="num">4</div>
+  <div class="body">
+    <h3>Wire harness to all backends, verify consistency</h3>
+    <div class="sub">sequential · needs Phase 2 + 3 complete</div>
+    <ul class="tight">
+      <li>Deploy all 4 backends on clarity k8s</li>
+      <li>Run harness against each backend, verify latency numbers are reasonable</li>
+      <li>Verify no <code>clear_cache</code> calls in new harness</li>
+      <li>Verify warmup protocol fires identically for all backends</li>
+      <li>Inspect raw CSVs — check per-trial variance looks plausible</li>
+      <li>Verify selectivity parameter means the same thing on all backends</li>
+      <li>Run <code>plot.py</code> — confirm error bars appear (if they don't, variance is zero = bug)</li>
+    </ul>
+  </div>
+</div>
+
+<h2 id="p45">Phase 4.5 — Multi-hop Benchmark <span class="pill p-acc">NEW</span></h2>
+<div class="phase">
+  <div class="num">4.5</div>
+  <div class="body">
+    <h3>Test where graph model actually differentiates</h3>
+    <div class="sub">sequential · needs Phase 4 complete</div>
+    <p>Single-hop results may be competitive. Multi-hop is where Jac's graph traversal vs SQL recursive CTEs vs Neo4j native graph diverges most.</p>
+    <ul class="tight">
+      <li>Define new endpoint: <code>POST /load_extended_feed</code> — tweets from friends-of-friends (2-hop)</li>
+      <li>Implement on all 4 backends:
+        <ul class="tight">
+          <li>Jac: natural walker <code>[-->:Follow-->:Follow-->:Tweet]</code></li>
+          <li>SQL: recursive CTE or self-join</li>
+          <li>Neo4j: native graph traversal (strong here too)</li>
+        </ul>
+      </li>
+      <li>Add hop depth as sweep parameter: [1, 2, 3]</li>
+      <li>Add to harness and orchestrate.sh</li>
+    </ul>
+    <div class="callout">This makes the paper's graph-model argument empirically grounded — not just "Jac is fast" but "Jac's graph abstraction scales better with traversal depth."</div>
+  </div>
+</div>
+
+<h2 id="p5">Phase 5 — Correctness Validation</h2>
+<div class="phase">
+  <div class="num">5</div>
+  <div class="body">
+    <h3>Cross-system result comparison</h3>
+    <div class="sub">sequential · needs Phase 4 complete</div>
+    <p>Original correctness check was tautological (each backend checked against its own insert count) and never gated execution. This phase replaces it.</p>
+    <ul class="tight">
+      <li>After each config point, run the same query on all 4 backends</li>
+      <li>Compare result sets: tweet IDs, counts, ordering</li>
+      <li>Hard fail with detailed log if backends diverge — do not silently continue</li>
+      <li>Check per-tweet likes/comments cardinality (original ignored this)</li>
+      <li>Log correctness results to <code>results/correctness.csv</code></li>
+    </ul>
+    <div class="callout warn">If backends return different result sets, the latency comparison is meaningless — they're not answering the same question.</div>
+  </div>
+</div>
+
+<h2 id="p6">Phase 6 — PostgreSQL jac-scale Backend <span class="pill p-par">‖ INDEPENDENT</span></h2>
+<div class="phase">
+  <div class="num par">6</div>
+  <div class="body">
+    <h3>New storage backend for jac-scale</h3>
+    <div class="sub">independent · any time · separate PR to jaseci-labs/jaseci</div>
+    <p>Replaces MongoDB (L3) with PostgreSQL in jac-scale. Allows running Jac with PostgreSQL as persistent storage — same engine as baselines, removes MongoDB as a confounding variable.</p>
+    <ul class="tight">
+      <li>Clone <code>jaseci-labs/jaseci</code></li>
+      <li>Read <code>IdentityStorage</code> base class + SQLite implementation (already SQLAlchemy)</li>
+      <li>Map all methods the MongoDB backend implements</li>
+      <li>Implement <code>PostgreSQLIdentityStorage</code> with Fable — activated via <code>POSTGRES_URI</code> env var</li>
+      <li>Open GitHub issue on jaseci first, get maintainer thumbs up before building</li>
+      <li>Open PR to <code>jaseci-labs/jaseci</code></li>
+    </ul>
+    <div class="callout good">SQLite backend is already SQLAlchemy-based. PostgreSQL via SQLAlchemy is likely a connection string swap + dialect differences only.</div>
+  </div>
+</div>
+
+<h2 id="structure">Repo Structure</h2>
+<pre>DBaseRunner/             &lt;-- standalone harness repo (everything lives here)
+  harness.py             # client + per-phase timing, sweeps, seed→verify
+  seed_gen.py            # deterministic, cross-backend-identical seed
+  backends/              # base.py + jac/postgres/sqlalchemy/neo4j adapters
+  servers/               # the 4 backend server impls (jac, pg, sqla, neo4j)
+  k8s/                   # deployment YAMLs per backend
+  orchestrate.sh         # deploy → health → run → next
+  results/  figures/  plot.py
+  HARNESS_CONTEXT.md     &lt;-- authoritative current methodology (read first)
+  HARNESS_REBUILD.html   &lt;-- this file (phase plan)
+JacDB/audit/             &lt;-- audit findings (separate; methodology-claim update pending)
+JacDB/littleX/           &lt;-- the researchers' original code (reference)
+JacDB/jaseci/            &lt;-- jaclang fork; filter_pushdown branch = GTI/FP source</pre>
+
+<h2 id="clarity">Clarity Setup Checklist</h2>
+<div class="card">
+  <table>
+    <tr><th>Check</th><th>Command</th><th>Expected</th></tr>
+    <tr><td>k8s cluster running</td><td><code>kubectl get nodes</code></td><td>Node(s) in Ready state</td></tr>
+    <tr><td>jaclang version</td><td><code>jac --version</code></td><td>0.13.x or later</td></tr>
+    <tr><td>topology_index in source</td><td><code>python3 -c "from jaclang.runtimelib import topology_index"</code></td><td>no ImportError</td></tr>
+    <tr><td>Docker available</td><td><code>docker --version</code></td><td>20.x or later</td></tr>
+    <tr><td>Python 3.10+</td><td><code>python3 --version</code></td><td>3.10+</td></tr>
+    <tr><td>Previous pods</td><td><code>kubectl get pods -A</code></td><td>know what's already deployed</td></tr>
+    <tr><td>GitHub CLI</td><td><code>gh auth status</code></td><td>logged in (for PRs)</td></tr>
+  </table>
+</div>
+
+<div class="callout good" style="margin-top:30px">
+  <strong>First action:</strong> SSH into clarity → run <code>kubectl get pods -A</code> → paste output to understand starting state.
+</div>
+
+<p class="mut" style="margin-top:40px;font-size:12px">Generated 2026-06-11 · <strong>updated &amp; moved into DBaseRunner/ on 2026-06-13.</strong> Current methodology + all corrections: <code>HARNESS_CONTEXT.md</code> (same folder). The phase structure below still holds; the dated banner up top lists what's superseded.</p>
+
+</main>
+</div>
+</body>
+</html>

@@ -1,0 +1,379 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>JacDB — Cluster Setup, Explained from Zero</title>
+<style>
+  :root{
+    --bg:#0e1116; --panel:#161b22; --panel2:#1c232d; --ink:#e6edf3; --mut:#9aa7b4;
+    --line:#2a323c; --accent:#5aa9ff; --good:#3fb950; --bad:#f85149; --warn:#d29922;
+    --unk:#8b949e; --purple:#bc8cff;
+    --mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+    --sans:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.65 var(--sans)}
+  .wrap{display:grid;grid-template-columns:268px 1fr;min-height:100vh}
+  nav{position:sticky;top:0;align-self:start;height:100vh;overflow:auto;padding:22px 16px;
+      border-right:1px solid var(--line);background:var(--panel)}
+  nav h1{font-size:15px;margin:0 0 2px;letter-spacing:.2px}
+  nav .sub{color:var(--mut);font-size:12px;margin-bottom:16px}
+  nav a{display:block;color:var(--mut);text-decoration:none;padding:5px 9px;border-radius:6px;font-size:13px}
+  nav a:hover{background:var(--panel2);color:var(--ink)}
+  nav .sec{font-size:11px;text-transform:uppercase;letter-spacing:.5px;color:var(--unk);margin:14px 9px 4px}
+  nav .phase-n{display:inline-block;width:18px;color:var(--accent);font-family:var(--mono);font-size:11px}
+  main{padding:34px 46px;max-width:1000px}
+  h2{font-size:22px;margin:42px 0 12px;padding-top:12px;border-top:1px solid var(--line)}
+  h2:first-of-type{border:0;margin-top:6px}
+  h3{font-size:16px;color:var(--accent);margin:22px 0 8px}
+  p{color:var(--ink)} .mut{color:var(--mut)}
+  a{color:var(--accent)}
+  code{font-family:var(--mono);background:var(--panel2);padding:1px 6px;border-radius:5px;font-size:12.5px}
+  pre{background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:14px 16px;
+      overflow-x:auto;font-family:var(--mono);font-size:12.5px;line-height:1.55}
+  pre .c{color:var(--good)}    /* good/comment-good */
+  pre .cm{color:var(--mut)}    /* comment */
+  .pill{display:inline-block;font-size:11px;font-weight:600;padding:2px 9px;border-radius:999px;font-family:var(--mono)}
+  .p-good{background:rgba(63,185,80,.15);color:var(--good)}
+  .p-bad{background:rgba(248,81,73,.15);color:var(--bad)}
+  .p-warn{background:rgba(210,153,34,.16);color:var(--warn)}
+  .p-acc{background:rgba(90,169,255,.15);color:var(--accent)}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:18px 22px;margin:14px 0}
+  .grid{display:grid;gap:12px}.cols-2{grid-template-columns:1fr 1fr}.cols-3{grid-template-columns:repeat(3,1fr)}
+  table{border-collapse:collapse;width:100%;margin:12px 0;font-size:13px}
+  th,td{border:1px solid var(--line);padding:8px 10px;text-align:left;vertical-align:top}
+  th{background:var(--panel2);color:var(--mut);font-weight:600}
+  tr:nth-child(even) td{background:rgba(255,255,255,.012)}
+  .callout{border-left:3px solid var(--accent);background:var(--panel2);padding:12px 16px;
+            border-radius:0 8px 8px 0;margin:12px 0;font-size:14px}
+  .callout.warn{border-color:var(--warn)}
+  .callout.good{border-color:var(--good)}
+  .callout.bad{border-color:var(--bad)}
+  .callout.purple{border-color:var(--purple)}
+  ul.tight{margin:7px 0;padding-left:20px} ul.tight li{margin:5px 0;font-size:14px}
+  .concept{display:flex;gap:14px;margin:14px 0;align-items:flex-start}
+  .concept .ic{flex:0 0 46px;height:46px;border-radius:10px;background:var(--panel2);border:1px solid var(--line);
+    display:flex;align-items:center;justify-content:center;font-size:22px}
+  .concept .body{flex:1}
+  .concept .body .term{font-weight:700;font-size:15px}
+  .concept .body .term .aka{color:var(--mut);font-weight:400;font-size:13px;margin-left:8px}
+  .concept .body .analogy{color:var(--purple);font-size:13px;font-style:italic;margin-top:3px}
+  .flow{font-family:var(--mono);font-size:13px;background:var(--panel2);border:1px solid var(--line);
+        border-radius:8px;padding:16px;text-align:center;margin:14px 0;line-height:2}
+  .flow .box{display:inline-block;border:1px solid var(--accent);border-radius:6px;padding:5px 12px;margin:3px;color:var(--ink)}
+  .flow .arr{color:var(--mut);margin:0 4px}
+  .flow .db{border-color:var(--good)}
+  .prob{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:0;margin:14px 0;overflow:hidden}
+  .prob .h{background:var(--panel2);padding:11px 16px;font-weight:700;font-size:14px;border-bottom:1px solid var(--line);
+    display:flex;justify-content:space-between;align-items:center}
+  .prob .h .tag{font-family:var(--mono);font-size:10px;background:rgba(248,81,73,.15);color:var(--bad);padding:2px 7px;border-radius:4px}
+  .prob .seg{padding:10px 16px;font-size:13.5px;border-bottom:1px solid var(--line)}
+  .prob .seg:last-child{border-bottom:0}
+  .prob .seg .lbl{font-family:var(--mono);font-size:10px;text-transform:uppercase;letter-spacing:.5px;color:var(--mut);display:block;margin-bottom:2px}
+  .prob .seg.fix .lbl{color:var(--good)}
+  .step{display:flex;gap:14px;margin:14px 0;align-items:flex-start}
+  .step .num{flex:0 0 34px;height:34px;border-radius:50%;background:var(--panel2);border:2px solid var(--accent);
+    color:var(--accent);font-family:var(--mono);font-weight:700;display:flex;align-items:center;justify-content:center;font-size:14px}
+  .step .body{flex:1}
+  .step .body h3{margin:4px 0 6px}
+  kbd{font-family:var(--mono);background:#000;border:1px solid var(--line);border-bottom-width:2px;border-radius:4px;padding:1px 6px;font-size:12px}
+</style>
+</head>
+<body>
+<div class="wrap">
+<nav>
+  <h1>Cluster Setup, Explained</h1>
+  <div class="sub">JacDB · zero-to-running, for a beginner</div>
+
+  <div class="sec">Concepts</div>
+  <a href="#why"><span class="phase-n">▸</span> Why any of this exists</a>
+  <a href="#concepts"><span class="phase-n">▸</span> The 8 words</a>
+
+  <div class="sec">Our setup</div>
+  <a href="#shape"><span class="phase-n">▸</span> The two-pod shape</a>
+  <a href="#split"><span class="phase-n">▸</span> Image vs ConfigMap</a>
+  <a href="#jac"><span class="phase-n">▸</span> Why Jac is special</a>
+
+  <div class="sec">What broke</div>
+  <a href="#problems"><span class="phase-n">▸</span> Problems &amp; fixes</a>
+
+  <div class="sec">Going forward</div>
+  <a href="#ritual"><span class="phase-n">▸</span> Session-start ritual</a>
+  <a href="#cheat"><span class="phase-n">▸</span> Status-code cheat sheet</a>
+</nav>
+<main>
+
+<h2 id="why">Why any of this exists</h2>
+<p>Running a server boils down to one sentence: <em>"I have some code; I need a computer somewhere to run it, with the right software installed, reachable over the network — and I want it to stay up."</em> Every confusing word below (Docker, pod, minikube…) is just a tool that solves one slice of that sentence. Read this once and the rest of the JacDB docs stop looking like alphabet soup.</p>
+
+<div class="callout">
+  Our goal: run <strong>four backends</strong> (jac, postgres, sqlalchemy, neo4j) on one machine called <code>clarity</code>, point one benchmark <em>harness</em> at each, and measure how fast each answers the same question. Everything here is the plumbing that gets those four servers alive and reachable.
+</div>
+
+<h2 id="concepts">The 8 words you actually need</h2>
+<p class="mut">In dependency order — each builds on the one above. The italic line is a plain-life analogy.</p>
+
+<div class="card">
+  <div class="concept">
+    <div class="ic">📦</div>
+    <div class="body">
+      <div class="term">Docker image <span class="aka">— a frozen template</span></div>
+      <div>A snapshot of a whole computer's hard drive: the operating system, the installed software (Python, Postgres…), and your code, all baked into one file. Nothing is <em>running</em> — it's just a saved template you can boot later.</div>
+      <div class="analogy">Like a saved disk image, or a cake recipe's finished photo — the thing you copy from.</div>
+    </div>
+  </div>
+  <div class="concept">
+    <div class="ic">▶️</div>
+    <div class="body">
+      <div class="term">Docker container <span class="aka">— a running copy of an image</span></div>
+      <div>You take the frozen image and "boot it up." It's now live and serving requests. One image can spawn many containers.</div>
+      <div class="analogy">The recipe (image) vs. the actual cake you baked from it (container). You can bake many cakes from one recipe.</div>
+    </div>
+  </div>
+  <div class="concept">
+    <div class="ic">📝</div>
+    <div class="body">
+      <div class="term">Dockerfile <span class="aka">— the recipe that builds an image</span></div>
+      <div>A short text file: "start from Python 3.12, copy my code in, install these packages." Running <code>docker build</code> follows the recipe and produces an image.</div>
+      <div class="analogy">The written recipe steps. <code>docker build</code> = actually cooking it into the finished template.</div>
+    </div>
+  </div>
+  <div class="concept">
+    <div class="ic">🚢</div>
+    <div class="body">
+      <div class="term">Kubernetes <span class="aka">— "k8s", the manager that runs containers for you</span></div>
+      <div>You don't start containers by hand. You hand Kubernetes a YAML file saying "keep this image running, reachable on this port," and it does it — and <strong>restarts it automatically if it crashes</strong>.</div>
+      <div class="analogy">A restaurant manager: you write the menu (YAML), they staff the kitchen, replace anyone who quits, and keep service running.</div>
+    </div>
+  </div>
+  <div class="concept">
+    <div class="ic">🫙</div>
+    <div class="body">
+      <div class="term">Pod <span class="aka">— Kubernetes' word for "one running unit"</span></div>
+      <div>Usually one container. "The <code>postgres-app</code> pod" = the container running our Postgres API code. <strong>Important: pods are disposable.</strong> Kubernetes kills and recreates them freely, and each new one gets a fresh network address.</div>
+      <div class="analogy">One cook on shift. If they leave, the manager hires an identical replacement — same job, different person.</div>
+    </div>
+  </div>
+  <div class="concept">
+    <div class="ic">🪧</div>
+    <div class="body">
+      <div class="term">Service <span class="aka">— a stable name/address for a pod</span></div>
+      <div>Because pods come and go with new addresses, you never talk to a pod directly. You talk to its Service (e.g. <code>postgres-app:8000</code>) and Kubernetes routes you to whichever pod is alive right now.</div>
+      <div class="analogy">The restaurant's phone number. It never changes, even when the cook on shift does.</div>
+    </div>
+  </div>
+  <div class="concept">
+    <div class="ic">🌐</div>
+    <div class="body">
+      <div class="term">Cluster <span class="aka">— the whole Kubernetes installation</span></div>
+      <div>The machines plus the manager, together. "The clarity cluster" = Kubernetes running on the <code>clarity</code> machine.</div>
+      <div class="analogy">The entire restaurant building + staff, not one cook.</div>
+    </div>
+  </div>
+  <div class="concept">
+    <div class="ic">🧪</div>
+    <div class="body">
+      <div class="term">minikube <span class="aka">— a tiny, single-machine Kubernetes for testing</span></div>
+      <div>Real Kubernetes spreads across a datacenter. minikube fakes the entire thing on one computer so you can develop. We run minikube on <code>clarity</code>. It has <strong>one quirk that burned us</strong> (see Problem A).</div>
+      <div class="analogy">A food-truck-sized version of the full restaurant — same idea, one location, for practice.</div>
+    </div>
+  </div>
+</div>
+
+<h2 id="shape">Our setup: the two-pod shape</h2>
+<p>Every backend follows the <strong>same shape on purpose</strong>: an <strong>app pod</strong> (the API code the harness talks to) and a separate <strong>DB pod</strong> (the actual database storing data). Keeping them split means all four backends have an identical topology — that fairness is one of the harness's design fixes.</p>
+
+<div class="flow">
+  <span class="box">harness <span class="mut">(the client / stopwatch)</span></span>
+  <span class="arr">──▶</span>
+  <span class="box">app pod <span class="mut">(API code)</span></span>
+  <span class="arr">──▶</span>
+  <span class="box db">DB pod <span class="mut">(database)</span></span>
+</div>
+
+<p>The <strong>harness</strong> is the Python program you run that acts as a stopwatch: it sends a request to the app pod, times how long the round-trip takes, and writes a row to a CSV. It is the same code for all four backends — only the backend it points at changes.</p>
+
+<h2 id="split">Image vs ConfigMap — the difference you noticed</h2>
+<p>You were right: <strong>postgres and neo4j each have their own built Docker image; sqlalchemy does not.</strong> The backends differ only in <em>how the app pod's code gets delivered</em>:</p>
+
+<table>
+  <tr><th>Backend</th><th>App pod image</th><th>How its code gets in</th><th>DB pod</th></tr>
+  <tr>
+    <td><strong>postgres</strong></td>
+    <td><span class="pill p-acc">custom-built</span> <code>dbaserunner/postgres-app</code></td>
+    <td><code>docker build</code> from <code>servers/postgres/Dockerfile</code></td>
+    <td>stock <code>postgres:15</code></td>
+  </tr>
+  <tr>
+    <td><strong>neo4j</strong></td>
+    <td><span class="pill p-acc">custom-built</span> <code>dbaserunner/neo4j-app</code></td>
+    <td><code>docker build</code> from <code>servers/neo4j/Dockerfile</code></td>
+    <td>stock <code>neo4j</code> image</td>
+  </tr>
+  <tr>
+    <td><strong>sqlalchemy</strong></td>
+    <td><span class="pill p-good">stock</span> <code>python:3.12-slim</code> <em>(no build)</em></td>
+    <td>source files mounted via a <strong>ConfigMap</strong> + <code>pip install</code> at startup</td>
+    <td>stock <code>postgres:16-alpine</code></td>
+  </tr>
+  <tr>
+    <td><strong>jac</strong></td>
+    <td colspan="2"><span class="pill p-warn">special — self-deploys</span> see next section</td>
+    <td>MongoDB + Redis (self-deployed)</td>
+  </tr>
+</table>
+
+<h3>What is a ConfigMap, and why the difference?</h3>
+<p>A <strong>ConfigMap</strong> is just "a bundle of text files Kubernetes hands to a pod." Since sqlalchemy's code is pure Python text, we skip building an image entirely: boot a stock Python pod, drop the <code>.py</code> files in via a ConfigMap, and let a small "init container" run <code>pip install</code> before the app starts. Postgres/neo4j needed a real build (their setup isn't just loose text files), so they get baked images.</p>
+
+<div class="grid cols-2">
+  <div class="callout good">
+    <strong>ConfigMap upside (sqlalchemy/jac):</strong> editing the code = just update the ConfigMap. Fast, no rebuild.
+  </div>
+  <div class="callout warn">
+    <strong>Image cost (postgres/neo4j):</strong> editing the code = rebuild the image with a new tag. Slower — and the source of Problem A below.
+  </div>
+</div>
+
+<h2 id="jac">Why Jac is the odd one out</h2>
+<p>Jac does <strong>not</strong> use our <code>k8s/jac/</code> manifest (that one is broken — see Problem D). Instead <code>servers/jac/deploy.sh</code> runs <code>jac start --scale</code>, and <strong>jac-cloud deploys its own entire stack</strong>: the app pod, a MongoDB pod (its long-term storage, called "L3"), a Redis pod (a faster cache layer, "L2"), plus ingress and monitoring. You build nothing — Jac does it all. That self-deploying magic is exactly why Jac took the most debugging.</p>
+
+<div class="callout purple">
+  <strong>Jac's three storage layers (you'll see L1/L2/L3 everywhere):</strong>
+  <ul class="tight" style="margin-bottom:0">
+    <li><strong>L1</strong> — an in-memory dictionary <em>inside the app pod itself</em>. A hit here is a local lookup with zero network trip. This is Jac's structural speed edge.</li>
+    <li><strong>L2</strong> — the Redis pod. A hit is one network hop + unpacking the data.</li>
+    <li><strong>L3</strong> — the MongoDB pod. The permanent store; a hit is a hop + a real database query.</li>
+  </ul>
+</div>
+
+<h2 id="problems">What broke on the live session — and the fix for each</h2>
+<p>One theme runs through almost all of these: <strong>stale state and leftover processes.</strong> A clean start (next section) prevents most of them.</p>
+
+<div class="prob">
+  <div class="h">A · "I rebuilt the image but nothing changed" <span class="tag">cost the most time</span></div>
+  <div class="seg"><span class="lbl">What happened</span>minikube is set to <code>imagePullPolicy: Never</code> ("never download, only use what's local"). Combined with the tag <code>:latest</code>, rebuilding under the same tag left the pod serving the <strong>old</strong> code — Kubernetes saw "I already have <code>:latest</code>" and never noticed the contents changed.</div>
+  <div class="seg"><span class="lbl">Why</span>A tag like <code>:latest</code> is just a label. Re-labeling new contents with an existing label doesn't force Kubernetes to reload.</div>
+  <div class="seg fix"><span class="lbl">Fix</span>Never reuse a tag. Every rebuild gets a fresh number (<code>:v2</code>, <code>:v3</code>…) and the YAML is updated to match. Build <em>directly inside</em> minikube with <code>eval $(minikube docker-env)</code> so the image lands where minikube can see it. Then confirm the pod is on the new tag before trusting any result.</div>
+</div>
+
+<div class="prob">
+  <div class="h">B · <code>curl</code> keeps hitting the wrong server <span class="tag">port squatter</span></div>
+  <div class="seg"><span class="lbl">What happened</span>To reach a pod from the command line we use <code>kubectl port-forward</code>, which opens a local port (say 8000) that tunnels into the cluster. A leftover <code>jac</code> process was already sitting on 8000, so our <code>curl</code> was talking to <em>it</em>, not the pod.</div>
+  <div class="seg"><span class="lbl">The tell</span>port-forward printed <code>Forwarding from [::1]:8000</code> (IPv6 only, no <code>127.0.0.1</code>) — that means the normal address was already taken.</div>
+  <div class="seg fix"><span class="lbl">Fix</span>Forward to a <em>free</em> port (<code>8001</code>), and check first: <code>ss -tlnp | grep :8001</code> should print nothing. Kill stray jac servers with <code>pkill -9 -f "jac start"</code>.</div>
+</div>
+
+<div class="prob">
+  <div class="h">C · Neo4j won't start — "Unrecognized setting DB.SERVICE.PORT" <span class="tag">env collision</span></div>
+  <div class="seg"><span class="lbl">What happened</span>Kubernetes auto-injects environment variables describing other services into every pod. Because our DB service was named <code>neo4j-db</code>, it set <code>NEO4J_DB_SERVICE_PORT=…</code>. The neo4j image reads <em>any</em> <code>NEO4J_*</code> variable as a config setting, didn't recognize this one, and refused to boot (crash loop).</div>
+  <div class="seg fix"><span class="lbl">Fix</span>Add <code>enableServiceLinks: false</code> to the pod spec — "don't inject those env vars." Already committed in the neo4j YAML.</div>
+</div>
+
+<div class="prob">
+  <div class="h">D · Jac's k8s manifest is broken <span class="tag">dead end</span></div>
+  <div class="seg"><span class="lbl">What happened</span>Our <code>k8s/jac/</code> tried the sqlalchemy trick (stock image + inject code), but Jac needs its binary and real installed packages — the init container wiped them out.</div>
+  <div class="seg fix"><span class="lbl">Fix</span>Abandon that manifest. Use <code>deploy.sh</code> (native <code>jac start --scale</code>) and let jac-cloud deploy itself.</div>
+</div>
+
+<div class="prob">
+  <div class="h">E · Jac prints "Deployment failed: Timeout" — but it's fine <span class="tag">false alarm</span></div>
+  <div class="seg"><span class="lbl">What happened</span><code>deploy.sh</code> self-checks by curling <code>localhost:30080</code>, which minikube doesn't expose → scary timeout message + it spawns a useless local dev server. The actual pods were healthy the whole time.</div>
+  <div class="seg fix"><span class="lbl">Fix</span>Ignore the message. Reach Jac via its real service <code>svc/jaseci-service</code> on port 8080. Kill the stray dev servers it spawned (they cause Problem B).</div>
+</div>
+
+<div class="prob">
+  <div class="h">F · Jac API quirks <span class="tag">one cycle each</span></div>
+  <div class="seg"><span class="lbl">What happened</span>Auth wants <code>{username, password}</code> (not email); the login token is at <code>body.data.token</code>; tweets come back at <code>body.data.reports[0].tweets</code>; and a walker must be listed in <code>main.jac</code> to be served at all (a missing import gave a <code>405</code>).</div>
+  <div class="seg fix"><span class="lbl">Fix</span>All handled in <code>backends/jac.py</code> + <code>main.jac</code>. Use <code>inspect_schema.py &lt;url&gt;</code> to dump any backend's real auth fields instead of guessing.</div>
+</div>
+
+<div class="prob">
+  <div class="h">G · <code>git push</code> denied <span class="tag">auth</span></div>
+  <div class="seg"><span class="lbl">What happened</span>The laptop's SSH key isn't registered with GitHub, and clarity pushes over HTTPS which needs a Personal Access Token (PAT).</div>
+  <div class="seg fix"><span class="lbl">Fix</span>Commit locally; Aaron pushes with the PAT. Pull single files with <code>git checkout origin/&lt;branch&gt; -- &lt;path&gt;</code> (grabs just that file, no full merge).</div>
+</div>
+
+<div class="callout bad">
+  <strong>Still open — Jac root isolation.</strong> A freshly-registered Jac user currently sees a <em>previous</em> user's data. Root cause is pinned (the benchmark walkers are declared <code>walker:pub</code> → no auth → they all share one hidden <code>system_root</code>). Fixable, not yet fixed. Until it is, <strong>Jac numbers aren't trustworthy</strong> — but postgres, sqlalchemy, and neo4j are validated and good to run.
+</div>
+
+<h2 id="ritual">The session-start ritual (do this every time)</h2>
+<p>Pods survive when you close SSH, so you usually <strong>don't need to redeploy</strong> — just clean up leftovers, check what's alive, re-open a tunnel, and go.</p>
+
+<div class="step">
+  <div class="num">1</div>
+  <div class="body">
+    <h3>Clean the slate</h3>
+    <pre><span class="cm"># kill stray jac dev servers (Problem B/E) and old tunnels</span>
+pkill -9 -f "jac start"
+pkill -f "kubectl port-forward"
+<span class="cm"># confirm the ports you'll use are free — no output = good</span>
+ss -tlnp | grep -E ':800[0-9]'</pre>
+  </div>
+</div>
+
+<div class="step">
+  <div class="num">2</div>
+  <div class="body">
+    <h3>See what's actually running</h3>
+    <pre>kubectl get pods   <span class="cm"># every line should say Running — not Error / CrashLoop / Pending</span></pre>
+    <p class="mut">If they're all Running, skip straight to step 4. You only redeploy when you changed code.</p>
+  </div>
+</div>
+
+<div class="step">
+  <div class="num">3</div>
+  <div class="body">
+    <h3>Only if you changed code: redeploy that ONE backend</h3>
+    <ul class="tight">
+      <li><strong>postgres / neo4j</strong> (image backends): <code>eval $(minikube docker-env)</code> → <code>docker build -t dbaserunner/&lt;b&gt;-app:vNEXT servers/&lt;b&gt;</code> → bump the tag in <code>k8s/&lt;b&gt;/*.yaml</code> → <code>kubectl apply -f k8s/&lt;b&gt;/</code>. <em>(Problem A — always a new tag.)</em></li>
+      <li><strong>sqlalchemy / jac</strong> (ConfigMap / native): just re-run their deploy script. No build.</li>
+      <li><strong>Always</strong> confirm the pod picked up the new tag before trusting results.</li>
+    </ul>
+  </div>
+</div>
+
+<div class="step">
+  <div class="num">4</div>
+  <div class="body">
+    <h3>Open a tunnel to a free port + sanity-check the endpoint</h3>
+    <pre>kubectl port-forward --address 127.0.0.1 svc/postgres-app 8001:8000 &amp;
+<span class="cm"># this catches Problems B + F instantly:</span>
+curl -s -o /dev/null -w "%{http_code}\n" -X POST http://127.0.0.1:8001/walker/load_own_tweets</pre>
+    <p class="mut">See the cheat sheet below for what each code means.</p>
+  </div>
+</div>
+
+<div class="step">
+  <div class="num">5</div>
+  <div class="body">
+    <h3>Run with ONE shared run-id, then sanity-check the CSV</h3>
+    <pre>uv run python harness.py --backend postgres --url http://localhost:8001 --run-id run01 --sweep fanout selectivity</pre>
+    <p>Use the <strong>same <code>--run-id</code></strong> for every backend so their seeded data lines up. Then open the result CSV: <code>response_bytes</code> must <strong>grow with fan-out</strong>. A flat or zero column means the seed didn't land — stop and investigate before trusting the latencies.</p>
+  </div>
+</div>
+
+<h2 id="cheat">Status-code cheat sheet</h2>
+<p>When you <code>curl</code> a walker endpoint in step 4, the HTTP status tells you instantly whether you're wired up right:</p>
+<table>
+  <tr><th>Code</th><th>Means</th><th>Verdict</th></tr>
+  <tr><td><code>401</code></td><td>Right app, route exists, just needs login (the harness logs in for you)</td><td><span class="pill p-good">GOOD — proceed</span></td></tr>
+  <tr><td><code>200</code></td><td>Worked outright</td><td><span class="pill p-good">GOOD</span></td></tr>
+  <tr><td><code>405</code></td><td>Wrong app on this port (usually a stray <code>jac</code> squatter — Problem B)</td><td><span class="pill p-bad">find it: ss -tlnp | grep :8001</span></td></tr>
+  <tr><td><code>404</code></td><td>Route missing — the running image doesn't have this walker (stale build — Problem A)</td><td><span class="pill p-warn">rebuild / re-check tag</span></td></tr>
+  <tr><td><code>000</code></td><td>The tunnel isn't connecting at all</td><td><span class="pill p-warn">re-open port-forward</span></td></tr>
+</table>
+
+<div class="callout">
+  <strong>Where the terse version lives:</strong> the copy-paste deploy commands and the debugging ladder are in <code>cluster-deploy-runbook</code> (memory) and <code>README.md §3</code>. This page is the <em>why</em> behind those commands. Read this once; use those for day-to-day.
+</div>
+
+<p class="mut" style="margin-top:40px;font-size:12px">Written 2026-06-13 for a first-time infra reader. Companion docs in this folder: <code>HARNESS_CONTEXT.md</code> (methodology) · <code>HARNESS_REBUILD.html</code> (phase plan).</p>
+
+</main>
+</div>
+</body>
+</html>

@@ -6,7 +6,7 @@ conflicts with code reality, stop and flag.
 **Companion:** `seed-design-spec.md` (same directory) — defines the seed generator, the neutral
 spec format, and the per-server endpoint requirements this spec depends on.
 
-**Provisional-grounding warning.** This design takes `Jac/docs/SOURCE_OF_TRUTH.md` §1.3
+**Provisional-grounding warning.** This design takes `audit/SOURCE_OF_TRUTH.md` §1.3
 (post-audit corrections) as given. A parallel fact-check session may revise §1.3. Items in this
 spec that depend on it are tagged `[CONTINGENT-§1.3]`. Everything else stands regardless.
 
