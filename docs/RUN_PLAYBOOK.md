@@ -51,7 +51,12 @@ Do the first run manually; script it only after the sequence is proven.
 9. **Plot:** `uv run python plot.py` → `figures/fig2_fanout.png`.
    - *Behavioral GTI check:* jac's curve should stay low and roughly flat. If it rises steeply
      like a naive scan, the index was OFF — Gate A missed something; don't trust jac's numbers.
-10. **Retrieve:** `git add results/ figures/ && git commit && git push` → `git pull` on laptop to view.
+10. **Retrieve (scp, NOT git — results/figures are gitignored):** from the **laptop**:
+    ```bash
+    scp 'clarity:~/DBaseRunner/results/*.csv'   results/
+    scp 'clarity:~/DBaseRunner/figures/*.png'   figures/
+    ```
+    Outputs are disposable artifacts; only code travels in git. Open `figures/fig2_fanout.png` locally.
 
 ## Phase 3 — script it (only after Phase 2 works)
 - `jac_run.sh` = step 8 (deploy → Gate A → Gate B → harness).

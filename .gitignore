@@ -7,7 +7,9 @@ dist/
 build/
 .pytest_cache/
 .coverage
+# run outputs are disposable — ferry off the cluster via scp, not git
 *.csv
+results/*_meta.json
 !results/.gitkeep
 figures/*.png
 figures/*.pdf
