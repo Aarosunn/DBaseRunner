@@ -79,3 +79,36 @@ class TestRender:
         _write_csv(tmp_path / "correctness.csv", [_row("x", "y", 1, 1.0, 1, 0)])
         rows = plot.read_results(str(tmp_path))
         assert all(r["backend"] == "jac" for r in rows)
+
+
+class TestCaption:
+    """H3: caption must reflect the actual run (from _meta.json), not a
+    hardcoded 'smoke run / 2 trials' literal."""
+
+    def test_caption_uses_trial_count_not_smoke(self):
+        cap = plot._caption("fanout", {"trials": 30, "cold_l1": False})
+        assert "30" in cap
+        assert "smoke" not in cap.lower()
+        assert "2 timed" not in cap
+
+    def test_caption_distinguishes_warm_and_cold(self):
+        warm = plot._caption("fanout", {"trials": 30, "cold_l1": False})
+        cold = plot._caption("fanout", {"trials": 30, "cold_l1": True})
+        assert "warm" in warm.lower()
+        assert "cold" in cold.lower()
+
+    def test_caption_handles_missing_params(self):
+        # No meta available -> still a string, no crash, no false trial count.
+        cap = plot._caption("fanout", None)
+        assert isinstance(cap, str)
+        assert "smoke" not in cap.lower()
+
+    def test_read_run_params_from_meta(self, tmp_path):
+        (tmp_path / "jac_meta.json").write_text(
+            '{"trials": 30, "warmup": 20, "cold_l1": false}')
+        params = plot.read_run_params(str(tmp_path))
+        assert params["trials"] == 30
+        assert params["cold_l1"] is False
+
+    def test_read_run_params_none_when_no_meta(self, tmp_path):
+        assert plot.read_run_params(str(tmp_path)) is None

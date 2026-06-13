@@ -11,6 +11,7 @@ Usage:  python plot.py --results results/ --figures figures/
 
 import argparse
 import csv
+import json
 import statistics
 from collections import defaultdict
 from pathlib import Path
@@ -37,16 +38,33 @@ _TITLE = {
     "selectivity": "Selectivity sweep at fan-out=1000",
 }
 
-_CAPTION = {
-    "fanout": (
-        "Client-side perf_counter timing via HTTP. 2 timed trials per point "
-        "(smoke run). All-warm cache. Single-hop workload."
-    ),
-    "selectivity": (
-        "Client-side perf_counter timing via HTTP. 2 timed trials per point "
-        "(smoke run). All-warm cache. Fan-out fixed at 1000."
-    ),
+_CAPTION_SUFFIX = {
+    "fanout":      "Single-hop workload.",
+    "selectivity": "Fan-out fixed at 1000.",
 }
+
+
+def read_run_params(results_dir):
+    """Read run parameters (trials, warmup, cold_l1) from the first
+    {backend}_meta.json sidecar in results_dir. Returns None if none exist —
+    the caption then degrades to the timing method without a fabricated count."""
+    for path in sorted(Path(results_dir).glob("*_meta.json")):
+        meta = json.loads(path.read_text())
+        return {"trials": meta.get("trials"),
+                "warmup": meta.get("warmup"),
+                "cold_l1": bool(meta.get("cold_l1"))}
+    return None
+
+
+def _caption(sweep, params):
+    """Build a figure caption from the run's actual metadata (H3) — never the
+    old hardcoded 'smoke run / 2 trials' literal."""
+    base = "Client-side perf_counter timing via HTTP."
+    if params and params.get("trials") is not None:
+        cache = "cold-L1 (jac diagnostic)" if params.get("cold_l1") else "all-warm"
+        base += f" {params['trials']} timed trials per point. {cache} cache."
+    suffix = _CAPTION_SUFFIX.get(sweep, "")
+    return f"{base} {suffix}".strip()
 
 
 def read_results(results_dir):
@@ -101,7 +119,7 @@ def aggregate(rows):
     return out
 
 
-def _plot_latency(agg, sweep, figures_dir, fname):
+def _plot_latency(agg, sweep, figures_dir, fname, params=None):
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
@@ -144,7 +162,7 @@ def _plot_latency(agg, sweep, figures_dir, fname):
     ax.grid(True, which="both", color="#cccccc", linewidth=0.6, linestyle="-")
     ax.set_axisbelow(True)
 
-    caption = _CAPTION.get(sweep, "")
+    caption = _caption(sweep, params)
     if caption:
         fig.text(0.5, 0.01, caption, ha="center", va="bottom",
                  fontsize=7.5, style="italic", color="#555555")
@@ -193,7 +211,7 @@ def _plot_bytes(agg, sweep, figures_dir, fname):
     return out
 
 
-def render(agg, figures_dir):
+def render(agg, figures_dir, params=None):
     Path(figures_dir).mkdir(parents=True, exist_ok=True)
     written = []
     fig_name = {
@@ -203,7 +221,7 @@ def render(agg, figures_dir):
     }
     for sweep in agg:
         base = fig_name.get(sweep, sweep)
-        written.append(_plot_latency(agg, sweep, figures_dir, f"{base}.png"))
+        written.append(_plot_latency(agg, sweep, figures_dir, f"{base}.png", params))
         written.append(_plot_bytes(agg, sweep, figures_dir, f"{base}_bytes.png"))
     return written
 
@@ -218,7 +236,8 @@ def main(argv=None):
     if not rows:
         raise SystemExit(f"no result CSVs found in {args.results}")
     agg = aggregate(rows)
-    written = render(agg, args.figures)
+    params = read_run_params(args.results)
+    written = render(agg, args.figures, params)
     for path in written:
         print(f"wrote {path}")
 
