@@ -143,8 +143,10 @@ def _backend_returning(tweets):
 
 
 def _tweet(key, like_count=14):
+    # likes cardinality must equal like_count to satisfy verify_seed's H1 gate.
     return {"content": f"[{key}] body", "like_count": like_count,
-            "likes": [], "comments": [], "author_username": "u", "created_at": "t"}
+            "likes": [f"liker_{i:03d}" for i in range(like_count)],
+            "comments": [], "author_username": "u", "created_at": "t"}
 
 
 class TestVerifySeed:
@@ -167,6 +169,36 @@ class TestVerifySeed:
         b = _backend_returning([_tweet("t_0000"), _tweet("t_9999")])
         with pytest.raises(SystemExit, match="key set"):
             harness.verify_seed(b, _spec(2))
+
+    def test_fails_on_empty_likes_when_like_count_positive(self):
+        # jac detached-liker risk (HARNESS_REVIEW H1): the scalar like_count says
+        # 14 but the likes array came back empty -> thin payload that the old
+        # verify (count + threshold + keys only) waved through.
+        b = _backend_returning([
+            {"content": "[t_0000] body", "like_count": 14, "likes": [],
+             "comments": [], "author_username": "u", "created_at": "t"}])
+        with pytest.raises(SystemExit, match="likes"):
+            harness.verify_seed(b, _spec(1))
+
+    def test_passes_when_likes_cardinality_matches(self):
+        b = _backend_returning([
+            {"content": "[t_0000] body", "like_count": 13,
+             "likes": [f"liker_{i:03d}" for i in range(13)], "comments": [],
+             "author_username": "u", "created_at": "t"}])
+        harness.verify_seed(b, _spec(1))   # no raise
+
+    def test_likes_cardinality_caps_at_pool_size(self):
+        # Generator guarantee is len(likes) == min(like_count, pool_size); if the
+        # liker pool were smaller than like_count, the cap (not like_count) is
+        # authoritative. Pool of 5, like_count 14 -> exactly 5 likes is correct.
+        spec = {"expected_matching": 1, "likes_threshold": 10,
+                "expected_matching_keys": ["t_0000"],
+                "likers": [f"l{i}" for i in range(5)]}
+        b = _backend_returning([
+            {"content": "[t_0000] body", "like_count": 14,
+             "likes": [f"l{i}" for i in range(5)], "comments": [],
+             "author_username": "u", "created_at": "t"}])
+        harness.verify_seed(b, spec)   # no raise: 5 == min(14, pool=5)
 
 
 class TestGuardNotAlreadySeeded:

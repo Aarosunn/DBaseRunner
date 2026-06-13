@@ -187,11 +187,21 @@ def verify_seed(backend, spec):
             f"got {len(tweets)}")
 
     threshold = spec["likes_threshold"]
+    # The liker pool caps how many distinct likes a tweet can carry. The seed
+    # generator guarantees len(likers) == min(like_count, pool_size); with no
+    # pool in the spec, fall back to like_count (no cap).
+    pool_size = len(spec.get("likers") or [])
     for t in tweets:
         if not t["like_count"] > threshold:
             raise SystemExit(
                 f"seed verify failed: tweet like_count {t['like_count']} "
                 f"is not > threshold {threshold}")
+        expected_likes = min(t["like_count"], pool_size) if pool_size else t["like_count"]
+        if len(t["likes"]) != expected_likes:
+            raise SystemExit(
+                f"seed verify failed: tweet like_count {t['like_count']} but got "
+                f"{len(t['likes'])} likes (expected {expected_likes}) — thin/empty "
+                f"likes payload (jac detached-liker risk, HARNESS_REVIEW H1)")
 
     got_keys = {_content_key(t["content"]) for t in tweets}
     expected_keys = set(spec["expected_matching_keys"])
