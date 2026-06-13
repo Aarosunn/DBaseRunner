@@ -13,6 +13,7 @@ import pytest
 
 
 from backends import JacBackend, PostgresBackend, SQLAlchemyBackend, Neo4jBackend
+from backends.base import extract_server_timing
 
 
 def fake_resp(json_body=None, content=b"", status=200, raise_exc=None):
@@ -295,8 +296,6 @@ class TestResetAndClearCache:
 
 
 # ── server-timing extractor (fair-timing spec §5) ────────────────────────────
-
-from backends.base import extract_server_timing
 
 
 class TestExtractServerTiming:
