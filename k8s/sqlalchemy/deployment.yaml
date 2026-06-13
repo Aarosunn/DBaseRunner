@@ -62,7 +62,7 @@ spec:
       enableServiceLinks: false
       containers:
         - name: postgres
-          image: postgres:16-alpine
+          image: postgres:15
           imagePullPolicy: IfNotPresent
           env:
             - name: POSTGRES_USER
@@ -70,7 +70,7 @@ spec:
             - name: POSTGRES_PASSWORD
               value: postgres
             - name: POSTGRES_DB
-              value: dbaserunner
+              value: littlex
             - name: PGDATA
               value: /var/lib/postgresql/data/pgdata
           ports:
@@ -78,13 +78,13 @@ spec:
               containerPort: 5432
           readinessProbe:
             exec:
-              command: ["pg_isready", "-U", "postgres", "-d", "dbaserunner"]
+              command: ["pg_isready", "-U", "postgres", "-d", "littlex"]
             initialDelaySeconds: 5
             periodSeconds: 3
             failureThreshold: 30
           livenessProbe:
             exec:
-              command: ["pg_isready", "-U", "postgres", "-d", "dbaserunner"]
+              command: ["pg_isready", "-U", "postgres", "-d", "littlex"]
             initialDelaySeconds: 30
             periodSeconds: 30
           resources:
@@ -181,7 +181,7 @@ spec:
           env:
             - name: DATABASE_URL
               # psycopg2-binary driver; matches requirements.txt (no psycopg3).
-              value: "postgresql+psycopg2://postgres:postgres@dbaserunner-postgres:5432/dbaserunner"
+              value: "postgresql+psycopg2://postgres:postgres@dbaserunner-postgres:5432/littlex"
             - name: PYTHONUNBUFFERED
               value: "1"
           ports:
