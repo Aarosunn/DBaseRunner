@@ -1,3 +1,9 @@
+> **⚠ ARCHIVED / SUPERSEDED (2026-06-13).** Historical handoff, kept for the record only.
+> Some instructions are now stale (e.g. `postgres-app:latest` + `docker push` — the current
+> flow uses immutable tags built into minikube). For the authoritative, current procedure see
+> **`docs/HARNESS_CONTEXT.md`** (methodology) and **`README.md` §3** (deploy/run). Do not follow
+> the commands below as-is.
+
 # HANDOFF — cluster (clarity) test session
 
 Goal of this session: take the Phase-4 single-hop harness from "correct by construction +
