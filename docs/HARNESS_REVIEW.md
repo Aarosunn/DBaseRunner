@@ -55,14 +55,16 @@ changes since the first pass: **`k8s/jac/` was deleted** and jac was pulled from
   selectivity or the fanout floor.
 
 **🔵 VERIFY (gap exposed by deleting `k8s/jac/`):**
-- `JAC_TOPOLOGY_INDEX` was only set in the deleted manifest (`:103`). It now rides
-  solely on `jac.toml topology_index=true` (the fallback). `deploy.sh` sets no env.
-  Confirm on-cluster that the `--scale` pod runs with the index actually ON.
+- GTI-on now rides **solely on `jac.toml topology_index=true`** (the fallback): the deleted
+  manifest set `JAC_TOPOLOGY_INDEX` — a var the runtime IGNORES (the real env override is
+  `JAC_INDEX_ENABLED`, `topo_utils.impl.jac:6`) — and `deploy.sh` sets no env. Confirm on-cluster
+  that the `--scale` pod runs with the index ON (Gate A in `RUN_PLAYBOOK.md`).
 
 **⚪ DEFER — real, but belongs to a later phase, do NOT do now:**
 - **H2** author=`"eval"` → Phase 5 content oracle · **M1** `ms_build` inconsistency
   → §5 fair-timing wiring · **M2** `clear_cache` L2 close → `--cold-l1` only ·
-  **C3-survivor** `JAC_INDEX_ENABLED` no-op → GTI-ablation line · **L1/L3/L4** →
+  **C3** (the bench walkers can't flip a process-level env per request → the naive-jac line
+  needs a separate `JAC_INDEX_ENABLED=false` deploy) → GTI-ablation line · **L1/L3/L4** →
   hardening.
 
 **✅ RESOLVED:** **M4** — `k8s/jac/` deleted + jac removed from `baselines.sh`
@@ -267,29 +269,40 @@ as a latent footgun, not an active break.
 
 ## Corrected from the first pass — do NOT re-raise
 
-### ✅ REFUTED: "the GTI enable env var is wrong in the deployment"
+### ⛔ CORRECTED 2026-06-13 — the env var name in BOTH the refutation and the C3-survivor was wrong
+Re-verified directly against the DEPLOYED branch source (`cse584-W26/jaseci@filter_pushdown`,
+`topo_utils.impl.jac:3-13`, fetched via `gh`):
+```
+impl _is_enabled -> bool {
+    env = os.environ.get("JAC_INDEX_ENABLED");          # env OVERRIDES
+    if env is not None { return env.lower() in ("1","true","yes"); }
+    return cfg.run.topology_index;                       # else fallback = jac.toml
+}
+```
+So the real runtime gate is **`JAC_INDEX_ENABLED`** (env override), falling back to
+`jac.toml topology_index`. Consequences, correcting both notes below:
+- The earlier "**Refuted: the gate is `JAC_TOPOLOGY_INDEX`**" was itself **wrong** — that var name
+  is not read by `_is_enabled`. The deleted `k8s/jac/deployment.yaml:103` set `JAC_TOPOLOGY_INDEX="true"`,
+  which the runtime **ignored** (wrong var). The index was on only via the `jac.toml` fallback.
+- The "**C3-survivor: `JAC_INDEX_ENABLED` is a no-op / nowhere in the runtime**" was **wrong** — it's
+  at `topo_utils.impl.jac:6`. `JAC_INDEX_ENABLED` is the real, working toggle.
+- The one TRUE narrow defect: the env is **process-level**, so a per-request `index_enabled` field
+  on a walker can't flip it. The naive-jac ablation line must be a **separate jac deploy with
+  `JAC_INDEX_ENABLED=false`**, not a per-point toggle.
+- Headline GTI-on relies on `jac.toml topology_index=true` (deploy.sh sets no env) → confirm on
+  cluster (Gate A in `RUN_PLAYBOOK.md`).
+
+The original (now-corrected) notes are kept below for the record — **do not act on their var name**.
+
+### ~~✅ REFUTED: "the GTI enable env var is wrong in the deployment"~~ (var name corrected above)
 The first pass claimed the deploy set the wrong var and the index might be OFF.
-**Refuted.** The runtime gate is `JAC_TOPOLOGY_INDEX` (verified:
-`jaseci/jac/jaclang/runtimelib/impl/topo_utils.impl.jac:3-9`, "the
-`JAC_TOPOLOGY_INDEX` env var … when set, is authoritative; the config flag is the
-fallback"). The deployment sets `JAC_TOPOLOGY_INDEX="true"`
-(`k8s/jac/deployment.yaml:103`) and `jac.toml` sets `topology_index = true`
-(`servers/jac/jac.toml:16`). The harness meta + HANDOFF use the correct name.
-**The headline jac timing path runs with the index correctly enabled.**
+The deployment sets `JAC_TOPOLOGY_INDEX="true"` (`k8s/jac/deployment.yaml:103`, now deleted) and
+`jac.toml` sets `topology_index = true` (`servers/jac/jac.toml:16`).
+**The headline jac timing path runs with the index enabled — via the `jac.toml` fallback.**
 
-### ⚠️ The narrow defect that survives (C3, rescoped): the bench ablation toggle is a no-op
-`JAC_INDEX_ENABLED` — toggled by the three `bench_*` walkers
-(`servers/jac/server.jac:610, 696, 768` and surrounding) and named as the
-"GTI ON/OFF" knob in `HARNESS_CONTEXT.md §1/§5/§10` — appears **nowhere** in the
-`jaseci` runtime (grep: zero hits outside DBaseRunner). So the index ON/OFF
-ablation those walkers implement does nothing: the `index_enabled` field is
-reported but the index state never changes, and the paper's `on_l1≈5` vs
-`off_l1≈103` signature will NOT separate when toggled. Scope: the
-ablation/`naive-jac` reference line (§9) and the optional B5 validation
-diagnostic — **not** the headline figures.
-
-**Fix:** the bench walkers and the §1/§5/§10 doc guidance must toggle
-`JAC_TOPOLOGY_INDEX`, not `JAC_INDEX_ENABLED`.
+### ~~⚠️ The narrow defect (C3): the bench ablation toggle is a no-op~~ (var name corrected above)
+The three `bench_*` walkers report an `index_enabled` field but cannot flip a process-level env
+per request. Real fix: deploy a separate `JAC_INDEX_ENABLED=false` jac for the naive line.
 
 ---
 

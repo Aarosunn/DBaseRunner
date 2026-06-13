@@ -36,9 +36,11 @@ Do the first run manually; script it only after the sequence is proven.
    cd servers/jac && ./deploy.sh && cd ../..
 
    # ── GATE A: GTI on?  (index off => jac runs the slow naive path => invalid latency)
-   grep topology_index servers/jac/jac.toml                 # expect: true  (source deploy.sh uses)
+   # Runtime gate (topo_utils.impl.jac:_is_enabled): env JAC_INDEX_ENABLED overrides,
+   # else falls back to jac.toml `topology_index`.
+   grep topology_index servers/jac/jac.toml                      # expect: true  (the fallback)
    POD=$(kubectl get pod -l app=jaseci -o name | head -1)
-   kubectl exec "$POD" -- printenv | grep -i JAC_TOPOLOGY   # expect EMPTY (unset => jac.toml fallback = on)
+   kubectl exec "$POD" -- printenv | grep -i JAC_INDEX_ENABLED   # EMPTY or true = ON; "false" = OFF (bad)
 
    # ── GATE B: :pub fix / isolation?  (fails => users collide => invalid data)
    JAC_BENCH_URL=http://localhost:8080 uv run pytest tests/test_jac_isolation.py -q   # must pass
@@ -68,8 +70,9 @@ git pull && RUN_ID=run02 ./run_all.sh    # run02/run03/… = a fresh label so da
 - **Gate B (isolation) red** → the `:pub` fix didn't take at runtime. Ship the 3-line figure
   (pg/sqla/neo4j are valid), debug jac before trusting any jac number.
 - **Gate A (GTI off)** → jac is on the naive path; its latency is meaningless. Check
-  `servers/jac/jac.toml` (`topology_index = true`) and that no env sets `JAC_TOPOLOGY_INDEX=false`,
-  redeploy, recheck.
+  `servers/jac/jac.toml` (`topology_index = true`) and that no env sets `JAC_INDEX_ENABLED=false`,
+  redeploy, recheck. (The naive-jac ablation line is produced by deliberately setting
+  `JAC_INDEX_ENABLED=false` on a separate jac deploy.)
 
 ## Port convention (don't unify)
 - baseline backends → `LOCAL_PORT=8001`; jac → `8080` (jac-cloud default).

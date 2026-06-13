@@ -181,7 +181,7 @@ Future: **Filter Pushdown** (field-predicate selectivity), **Multihop** (hop-dep
 
 - [ ] **Refocus selectivity: FP → TYPE.** Re-introduce mixed-type neighbors off root; PG/SQLA discriminator/polymorphic + TPT (two conditions); Neo4j one generic edge + node-label; Jac `[root-->(?:Tweet)]`. Move the `like_count` predicate to a separate future FP test. *(gates the SELECTIVITY run only; fanout run does not need it)*
 - [ ] **Add STI vs optimized conditions** for relational/Neo4j; record implementation **DBLOC/LOC for both** conditions. *(figure 3b / Latency-vs-DBLOC)*
-- [ ] **Add a GTI index ON/OFF toggle flag** — must set **`JAC_TOPOLOGY_INDEX`** (NOT `JAC_INDEX_ENABLED`, which is a runtime no-op) to produce the naive-jac reference line on Fanout + 3b.
+- [ ] **Wire the GTI index ON/OFF ablation** — deploy a second jac with env **`JAC_INDEX_ENABLED=false`** to produce the naive-jac reference line on Fanout + 3b. (Verified deployed-branch source `topo_utils.impl.jac:_is_enabled`: env `JAC_INDEX_ENABLED` overrides, else falls back to `jac.toml topology_index`. The env is **process-level** — a separate deploy, not a per-request toggle. The earlier "use JAC_TOPOLOGY_INDEX / JAC_INDEX_ENABLED is a no-op" claim was WRONG for this build.)
 - [x] ~~**Split `ms_fetch` vs `ms_build`** server-side spans~~ — **DONE** (commit `d1ebf3f`, Approach A). Reduced to 2 phases + residual; `ms_auth`/`ms_query` intentionally folded (see §5).
 - [ ] **Run the bench client in-cluster** over the Service; kill `port-forward` for measured runs. *(DEFERRED — only cleans up provisional `client_total`/`network_ms`; `server_total` carries the claims)*
 - [ ] **Emit p50/p95/p99** in `plot.py`; bands on the figures. *(post-run; recomputable from saved rows)*
