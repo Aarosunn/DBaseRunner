@@ -179,16 +179,16 @@ Future: **Filter Pushdown** (field-predicate selectivity), **Multihop** (hop-dep
 
 ## 10. Concrete changes to make to the harness (actionable)
 
-- [ ] **Refocus selectivity: FP → TYPE.** Re-introduce mixed-type neighbors off root; PG/SQLA discriminator/polymorphic + TPT (two conditions); Neo4j one generic edge + node-label; Jac `[root-->(?:Tweet)]`. Move the `like_count` predicate to a separate future FP test.
-- [ ] **Add STI vs optimized conditions** for relational/Neo4j; record implementation **DBLOC/LOC for both** conditions.
-- [ ] **Add a GTI index ON/OFF toggle flag** (set `JAC_INDEX_ENABLED`) to produce the naive-jac reference line on Fanout.
-- [ ] **Split `ms_fetch` vs `ms_build`** server-side spans (and add `ms_auth`, `ms_query`) for the phase breakdown.
-- [ ] **Run the bench client in-cluster** over the Service; kill `port-forward` for measured runs.
-- [ ] **Emit p50/p95/p99** in `plot.py`; bands on the figures.
+- [ ] **Refocus selectivity: FP → TYPE.** Re-introduce mixed-type neighbors off root; PG/SQLA discriminator/polymorphic + TPT (two conditions); Neo4j one generic edge + node-label; Jac `[root-->(?:Tweet)]`. Move the `like_count` predicate to a separate future FP test. *(gates the SELECTIVITY run only; fanout run does not need it)*
+- [ ] **Add STI vs optimized conditions** for relational/Neo4j; record implementation **DBLOC/LOC for both** conditions. *(figure 3b / Latency-vs-DBLOC)*
+- [ ] **Add a GTI index ON/OFF toggle flag** — must set **`JAC_TOPOLOGY_INDEX`** (NOT `JAC_INDEX_ENABLED`, which is a runtime no-op) to produce the naive-jac reference line on Fanout + 3b.
+- [x] ~~**Split `ms_fetch` vs `ms_build`** server-side spans~~ — **DONE** (commit `d1ebf3f`, Approach A). Reduced to 2 phases + residual; `ms_auth`/`ms_query` intentionally folded (see §5).
+- [ ] **Run the bench client in-cluster** over the Service; kill `port-forward` for measured runs. *(DEFERRED — only cleans up provisional `client_total`/`network_ms`; `server_total` carries the claims)*
+- [ ] **Emit p50/p95/p99** in `plot.py`; bands on the figures. *(post-run; recomputable from saved rows)*
 - [ ] **Wire the Phase-5 content oracle** + plot-gating.
-- [ ] **Min target-node floor** in the seed grid.
-- [ ] **Equalize pod CPU/mem** across backends (or justify per-engine).
-- [ ] **Fix the jac root-isolation bug** (§13) — prerequisite for trusting any Jac number.
+- [x] ~~**Min target-node floor** in the seed grid~~ — **DONE** (commit `d65e9d1`, L2: fanout selectivity 5%→25%, SPEC_VERSION→2).
+- [x] ~~**Equalize pod CPU/mem**~~ — **DONE** for the 3 manifest backends (commit `1dbdb36`, identical 1000m/1Gi Guaranteed QoS). ⚠ the jac `--scale` pod still needs on-cluster pinning.
+- [x] ~~**Fix the jac root-isolation bug**~~ — **DONE in code** (commit `05a88a2`, dropped `:pub`); cluster isolation-test verify pending (§13).
 
 ---
 
@@ -221,4 +221,4 @@ Future: **Filter Pushdown** (field-predicate selectivity), **Multihop** (hop-dep
 
 **NOT** jac-cloud's fault (jac-scale isolates correctly when auth IS required), **NOT** the harness (token is refreshed per point, `base.py:90,98`; distinct usernames `harness.py:314`).
 
-**Fix:** drop `:pub` from all data-plane walkers (load_own_tweets / seed_tweets / clear_cache / setup_profile / create_tweet / like_tweet / add_comment / ...); keep ONLY `health` public. No harness change (token already sent). **Do NOT strip the `grant(ConnectPerm)` calls** — they are a red herring for THIS bug but **load-bearing for the cross-root follow graph** (Phase 4.5): they authorize the `Follow` edge from one root's Profile into another's. Removing them breaks multi-hop later (see [[jac-cross-root-follow-concern]]). Add an isolation regression test: register A → seed → register B → assert B's `load_own_tweets` is empty. Then re-run jac. **Caveat:** confirmed against deployed *static* source; final runtime confirmation = run the isolation test on the cluster after redeploy.
+**Fix — APPLIED (commit `05a88a2`):** dropped `:pub` from the data-plane walkers (load_own_tweets / seed_tweets / clear_cache / get_all_profiles / import_data); only `health` stays public. No harness change (token already sent). The `grant(ConnectPerm)` calls were **left intact** — a red herring for THIS bug but **load-bearing for the cross-root follow graph** (Phase 4.5): they authorize the `Follow` edge from one root's Profile into another's (see [[jac-cross-root-follow-concern]]). Isolation regression test added (`tests/test_jac_isolation.py`: register A → seed → register B → assert B's `load_own_tweets` empty; skips unless `JAC_BENCH_URL` set). **Remaining:** confirmed against deployed *static* source; the one open step is running that test against the live pod after redeploy.

@@ -21,6 +21,14 @@ deploy paths, not the headline — scope is called out per item.
 
 ## Adversarial triage — what actually must be fixed (2026-06-13, post-cleanup)
 
+> **STATUS (committed 2026-06-13):** ✅ **C1, C2, M3, H1, H3, L2 all DONE + committed**
+> (`1dbdb36`/`cadd896`/`2c28ed1`/`5f2f7fc`/`371396c`/`d65e9d1`); ✅ **M4 resolved**
+> (`82d16eb`); ✅ **fair-timing markers DONE** (`d1ebf3f`); ✅ **`:pub` fix DONE** (`05a88a2`).
+> Remaining before the **fanout** run: cluster ops only (build `postgres-app:v1`, reseed
+> SPEC_VERSION 2, pin the jac `--scale` pod = the C1 caveat, verify topology index, run the
+> isolation test). The **selectivity** run additionally needs the FP→type refocus (#9, not
+> started). The bullets below are the original verdict, kept as the record.
+
 Second-pass bad-mood verdict on necessity, after re-verifying every item against
 live source. The findings below are evidence; this is the priority call. Two state
 changes since the first pass: **`k8s/jac/` was deleted** and jac was pulled from

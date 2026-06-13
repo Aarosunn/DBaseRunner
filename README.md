@@ -123,8 +123,9 @@ backend never touches another.
 >   Timeout"** and spawns a useless host dev server on :8000/8001/8002. **False alarm** — the
 >   k8s pods are fine; use `svc/jaseci-service` on 8080. Kill the stray host servers with
 >   `pkill -9 -f "jac start"` (they squat `LOCAL_PORT` and break orchestrate's health check).
-> - **Open bug:** jac users are not root-isolated (a fresh user's `load_own_tweets` returns a
->   prior user's tweets), which breaks the per-user namespacing. See [Known gaps](#known-gaps).
+> - **Root isolation (fixed, cluster-verify pending):** `:pub` data-plane walkers ran as GUEST
+>   on `system_root` → users collided. Fixed by dropping `:pub` (commit `05a88a2`); run
+>   `tests/test_jac_isolation.py` against the live pod to confirm. See [Known gaps](#known-gaps).
 >
 > A `walker:pub` must be listed in `main.jac`'s `import from server { ... }` to be served
 > (defining it in `server.jac` alone returns 405). jac-cloud auth wants `{username, password}`
@@ -223,7 +224,7 @@ can never be mistaken for the headline figures. Don't use it for headline runs.
 | **Phase 4.5 — 2-hop `load_feed`** (the paper's actual Fig 5/6 workload: fan-out = followees) | **not built.** Current harness is single-hop `load_own_tweets` → expect parity, not the paper's separation. |
 | **Phase 5 — cross-backend correctness** (compare result sets across backends) | not built. `verify_seed` checks each backend against its own spec, not against the others. |
 | **Live verification (2026-06-12)** | postgres / neo4j / sqlalchemy ran on clarity minikube and validate (`response_bytes` scales with fanout). jac deployed + auth + seed working after a fix chain (see below). |
-| **jac root isolation — OPEN BUG** | A freshly-registered jac user's `load_own_tweets` returns a *previous* user's tweets: jac-cloud isn't isolating users by root in `--scale` mode. This breaks the per-user namespacing (fresh user per param point) on jac. Walkers look correctly scoped (`[-->(?:Profile)-->(?:Tweet)]` from `here`); suspect the `grant(..., ConnectPerm)` in `seed_tweets` or shared-root behavior. Needs jac-cloud-side investigation before jac data is valid. |
+| **jac root isolation — FIXED in code, cluster-verify pending** | Symptom was: a fresh jac user's `load_own_tweets` returned a *previous* user's tweets. **Root cause pinned** (not the `grant` — that was a red herring): the data-plane walkers were `walker:pub` → on the deployed `filter_pushdown` branch a `:pub` walker skips JWT→root binding and runs as GUEST on `system_root`, so all bench users collide (`serve.endpoints.impl.jac:103`). **Fix applied** (commit `05a88a2`): dropped `:pub` from data-plane walkers, kept only `health` public; `grant(ConnectPerm)` left intact (load-bearing for the Phase-4.5 cross-root follow graph). Confirmed against deployed source; the isolation regression test (`tests/test_jac_isolation.py`) still needs one live run on the cluster to confirm at runtime. See `docs/HARNESS_CONTEXT.md` §13. |
 
 ## Tests at a glance
 

@@ -124,7 +124,7 @@
     <li><strong>Payload is now full</strong> (content + likes + comments), not IDs-only; <code>response_bytes</code> guards parity.</li>
     <li><strong>Figure roster (locked):</strong> DBLOC · Fanout (+naive-jac line) · Type-Selectivity · Latency-vs-DBLOC · Phase-Breakdown. Multi-hop + Filter-Pushdown → future.</li>
     <li><strong>Backend:</strong> MongoDB now; re-run all figs on Postgres-L3 once built. <strong>Write-heavy workload</strong> = near-future priority (the GTI is built at write time → a read-only benchmark hides its cost).</li>
-    <li><strong>Blocker:</strong> jac root-isolation bug under <code>--scale</code> — fix before trusting any Jac number.</li>
+    <li><strong>Blocker (resolved in code):</strong> jac root-isolation bug under <code>--scale</code> — was <code>walker:pub</code> running as GUEST on <code>system_root</code>; fixed by dropping <code>:pub</code> (commit <code>05a88a2</code>), one cluster isolation-test verify left.</li>
   </ul>
 </div>
 

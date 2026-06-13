@@ -83,11 +83,11 @@ file, §4).
   "spec_version": 1,
   "sweep_type": "fanout",            // "fanout" | "selectivity"
   "param_value": 250,
-  "rng_seed_string": "v1:fanout:250",// the string hashed to seed the RNG (provenance)
+  "rng_seed_string": "v2:fanout:250",// the string hashed to seed the RNG (provenance)
   "likes_threshold": 10,
   "n_tweets": 250,
-  "selectivity_pct": 5,              // fanout sweep fixes 5; selectivity sweep = param_value
-  "expected_matching": 13,           // EXACT count of tweets with like_count > 10
+  "selectivity_pct": 25,             // fanout sweep fixes 25 (SPEC_VERSION 2); selectivity sweep = param_value
+  "expected_matching": 63,           // EXACT count of tweets with like_count > 10
   "expected_matching_keys": ["t_0007", "t_0019", ...],   // len == expected_matching
   "likers": ["liker_000", "...", "liker_031"],           // pool, run-agnostic names
   "eval_user_suffix": "fanout_250",  // harness prefixes bench_{run_id}_ at seed time
@@ -139,7 +139,7 @@ Per point `(sweep_type, param_value)`:
    `int.from_bytes(hashlib.sha256(s.encode()).digest()[:8], "big")` to be immune; the sha256
    route is RECOMMENDED and assumed below).
 2. **Dimensions.**
-   - fanout sweep: `n_tweets = param_value`, `selectivity_pct = 5`.
+   - fanout sweep: `n_tweets = param_value`, `selectivity_pct = 25` (raised from 5% in SPEC_VERSION 2 per HARNESS_REVIEW L2 — clears the ≥20-matching floor at the lowest point).
    - selectivity sweep: `n_tweets = 1000`, `selectivity_pct = param_value`.
    - `n_matching = (n_tweets * selectivity_pct + 50) // 100`  (integer round-half-up; exact
      table in §5).
@@ -164,11 +164,11 @@ expected_matching`; every matching tweet `like_count > K`; every non-matching `<
 
 ## 5. Sweep tables (normative)
 
-Fan-out sweep (Fig 5) — selectivity fixed at 5%:
+Fan-out sweep (Fig 5) — selectivity fixed at 25% (SPEC_VERSION 2):
 
 | param_value (n_tweets) | 100 | 250 | 500 | 750 | 1000 |
 |---|---|---|---|---|---|
-| expected_matching | 5 | 13 | 25 | 38 | 50 |
+| expected_matching | 25 | 63 | 125 | 188 | 250 |
 
 Selectivity sweep (Fig 6) — n_tweets fixed at 1000:
 

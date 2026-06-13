@@ -297,7 +297,7 @@
 </div>
 
 <div class="callout bad">
-  <strong>Still open — Jac root isolation.</strong> A freshly-registered Jac user currently sees a <em>previous</em> user's data. Root cause is pinned (the benchmark walkers are declared <code>walker:pub</code> → no auth → they all share one hidden <code>system_root</code>). Fixable, not yet fixed. Until it is, <strong>Jac numbers aren't trustworthy</strong> — but postgres, sqlalchemy, and neo4j are validated and good to run.
+  <strong>Jac root isolation — fixed in code, one cluster-verify left.</strong> A freshly-registered Jac user <em>was</em> seeing a previous user's data. Root cause pinned: the benchmark walkers were declared <code>walker:pub</code> → no auth → they all shared one hidden <code>system_root</code>. <strong>Fixed</strong> (dropped <code>:pub</code> from the data-plane walkers, commit <code>05a88a2</code>); the regression test <code>tests/test_jac_isolation.py</code> just needs one live run on the cluster to confirm. The other three backends were always validated and good to run.
 </div>
 
 <h2 id="ritual">The session-start ritual (do this every time)</h2>
