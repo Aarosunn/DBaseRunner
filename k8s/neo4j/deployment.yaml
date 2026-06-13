@@ -24,6 +24,13 @@ spec:
           env:
             - name: NEO4J_AUTH
               value: neo4j/neo4j_password
+          resources:
+            requests:
+              cpu: "1000m"
+              memory: "1Gi"
+            limits:
+              cpu: "1000m"
+              memory: "1Gi"
 ---
 apiVersion: v1
 kind: Service
@@ -69,6 +76,13 @@ spec:
               value: neo4j
             - name: NEO4J_PASSWORD
               value: neo4j_password
+          resources:
+            requests:
+              cpu: "1000m"
+              memory: "1Gi"
+            limits:
+              cpu: "1000m"
+              memory: "1Gi"
 ---
 apiVersion: v1
 kind: Service

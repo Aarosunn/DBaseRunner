@@ -24,6 +24,13 @@ spec:
               value: postgres
             - name: POSTGRES_PASSWORD
               value: postgres
+          resources:
+            requests:
+              cpu: "1000m"
+              memory: "1Gi"
+            limits:
+              cpu: "1000m"
+              memory: "1Gi"
 ---
 apiVersion: v1
 kind: Service
@@ -60,6 +67,13 @@ spec:
           env:
             - name: DATABASE_URL
               value: postgresql://postgres:postgres@postgres-db:5432/littlex
+          resources:
+            requests:
+              cpu: "1000m"
+              memory: "1Gi"
+            limits:
+              cpu: "1000m"
+              memory: "1Gi"
 ---
 apiVersion: v1
 kind: Service
