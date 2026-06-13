@@ -36,10 +36,11 @@ def attach(backend):
 # ── token paths per backend (ensure_user / auth) ─────────────────────────────
 
 class TestAuthTokenPaths:
-    def test_jac_reads_top_level_token(self):
+    def test_jac_reads_nested_data_token(self):
+        # jac-cloud login envelope: {"ok": true, "data": {"username","token","root_id"}}
         b = JacBackend("http://x")
         s = attach(b)
-        s.post.return_value = fake_resp({"token": "JWT123"})
+        s.post.return_value = fake_resp({"data": {"token": "JWT123"}})
         b.auth("u@x", "pw")
         assert s.headers["Authorization"] == "Bearer JWT123"
 
@@ -99,13 +100,17 @@ class TestEnsureUser:
         b.ensure_user("bench_u", "pw")
         assert b._username == "bench_u"
 
-    def test_jac_register_uses_email_key(self):
+    def test_jac_register_uses_username_key(self):
+        # Cluster-verified: jac-cloud /user/register wants {username, password},
+        # NOT an email field; token is nested at data.token.
         b = JacBackend("http://x")
         s = attach(b)
-        s.post.side_effect = [fake_resp({"token": "JWT"}), fake_resp({"token": "JWT"})]
+        s.post.side_effect = [fake_resp({"data": {"token": "JWT"}}),
+                              fake_resp({"data": {"token": "JWT"}})]
         b.ensure_user("bench_u", "pw")
         reg_body = s.post.call_args_list[0].kwargs["json"]
-        assert reg_body.get("email") == "bench_u"
+        assert reg_body.get("username") == "bench_u"
+        assert "email" not in reg_body
 
     def test_baseline_register_uses_username_key(self):
         b = PostgresBackend("http://x")
