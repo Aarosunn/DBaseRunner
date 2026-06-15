@@ -23,6 +23,7 @@ from typing import Optional
 from fastapi import FastAPI, Request, HTTPException, Body
 from pydantic import BaseModel
 from neo4j import GraphDatabase
+from neo4j.exceptions import ServiceUnavailable
 
 
 NEO4J_URI = os.environ.get("NEO4J_URI", "bolt://neo4j:7687")
@@ -35,11 +36,24 @@ driver = GraphDatabase.driver(NEO4J_URI, auth=(NEO4J_USER, NEO4J_PASSWORD))
 
 @app.on_event("startup")
 def ensure_constraints():
-    with driver.session() as s:
-        s.run(
-            "CREATE CONSTRAINT profile_jacid IF NOT EXISTS "
-            "FOR (p:Profile) REQUIRE p.jac_id IS UNIQUE"
-        )
+    # neo4j (JVM) reports its container Running before Bolt is actually
+    # listening, so on a cold deploy this query races the DB and raises
+    # ServiceUnavailable — which would fail FastAPI startup and crashloop the
+    # pod. Retry until neo4j accepts connections (up to ~120s) so the app comes
+    # up cleanly on the first scheduling instead of relying on restart luck.
+    last_err = None
+    for _ in range(60):  # 60 * 2s = up to 120s
+        try:
+            with driver.session() as s:
+                s.run(
+                    "CREATE CONSTRAINT profile_jacid IF NOT EXISTS "
+                    "FOR (p:Profile) REQUIRE p.jac_id IS UNIQUE"
+                )
+            return
+        except ServiceUnavailable as e:
+            last_err = e
+            time.sleep(2)
+    raise RuntimeError("neo4j not reachable after 120s of startup retries") from last_err
 
 
 def _bearer_username(request: Request) -> str:
