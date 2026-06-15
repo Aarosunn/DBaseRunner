@@ -37,7 +37,8 @@ ORDER=(postgres sqlalchemy neo4j)
 NAMESPACE="${NAMESPACE:-default}"
 LOCAL_PORT="${LOCAL_PORT:-8000}"
 ROLLOUT_TIMEOUT="${ROLLOUT_TIMEOUT:-300s}"
-HEALTH_RETRIES="${HEALTH_RETRIES:-120}"  # seconds; covers neo4j JVM cold-boot + DB-connect
+HEALTH_RETRIES="${HEALTH_RETRIES:-300}"  # seconds; neo4j-db cold-boot (the bottleneck) can run
+                                         # well past 2min on a loaded single-node minikube
 
 # ── args
 SELECTED="all"

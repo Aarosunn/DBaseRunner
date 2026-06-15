@@ -41,8 +41,11 @@ def ensure_constraints():
     # ServiceUnavailable — which would fail FastAPI startup and crashloop the
     # pod. Retry until neo4j accepts connections (up to ~120s) so the app comes
     # up cleanly on the first scheduling instead of relying on restart luck.
+    # neo4j-db cold-boot is the real bottleneck and can run past 2min on a
+    # loaded single-node minikube, so wait up to ~280s (just under the harness's
+    # 300s health gate) rather than crashing and leaning on restart recovery.
     last_err = None
-    for _ in range(60):  # 60 * 2s = up to 120s
+    for _ in range(140):  # 140 * 2s = up to 280s
         try:
             with driver.session() as s:
                 s.run(
@@ -53,7 +56,7 @@ def ensure_constraints():
         except ServiceUnavailable as e:
             last_err = e
             time.sleep(2)
-    raise RuntimeError("neo4j not reachable after 120s of startup retries") from last_err
+    raise RuntimeError("neo4j not reachable after 280s of startup retries") from last_err
 
 
 def _bearer_username(request: Request) -> str:
