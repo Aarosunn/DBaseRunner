@@ -37,7 +37,7 @@ ORDER=(postgres sqlalchemy neo4j)
 NAMESPACE="${NAMESPACE:-default}"
 LOCAL_PORT="${LOCAL_PORT:-8000}"
 ROLLOUT_TIMEOUT="${ROLLOUT_TIMEOUT:-300s}"
-HEALTH_RETRIES="${HEALTH_RETRIES:-60}"
+HEALTH_RETRIES="${HEALTH_RETRIES:-120}"  # seconds; covers neo4j JVM cold-boot + DB-connect
 
 # ── args
 SELECTED="all"
@@ -83,6 +83,20 @@ wait_for_port() {
   return 1
 }
 
+# A TCP socket opens the instant `kubectl port-forward` binds — long before the app
+# accepts requests (FastAPI won't serve until lifespan startup completes, which here
+# blocks on the DB becoming reachable + schema bootstrap; neo4j adds JVM cold-boot).
+# So gate on an actual HTTP 200 from /health, not just the open port.
+wait_for_health() {
+  local port="$1" i code
+  for ((i=0; i<HEALTH_RETRIES; i++)); do
+    code="$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:${port}/health" 2>/dev/null || true)"
+    [[ "$code" == "200" ]] && return 0
+    sleep 1
+  done
+  return 1
+}
+
 echo "==> run_id=${RUN_ID}  namespace=${NAMESPACE}  backends=${BACKENDS[*]}"
 
 for b in "${BACKENDS[@]}"; do
@@ -109,6 +123,12 @@ for b in "${BACKENDS[@]}"; do
   PF_PID=$!
   if ! wait_for_port "$LOCAL_PORT"; then
     echo "  ERROR: port ${LOCAL_PORT} never opened for ${b}" >&2
+    stop_pf; [[ "$KEEP" -eq 0 ]] && kubectl delete -n "$NAMESPACE" -f "k8s/${b}/" --ignore-not-found
+    exit 1
+  fi
+  echo "  [3.5/5] wait for ${b} /health to return 200"
+  if ! wait_for_health "$LOCAL_PORT"; then
+    echo "  ERROR: ${b} /health not 200 after ${HEALTH_RETRIES}s (app/db startup not ready)" >&2
     stop_pf; [[ "$KEEP" -eq 0 ]] && kubectl delete -n "$NAMESPACE" -f "k8s/${b}/" --ignore-not-found
     exit 1
   fi
