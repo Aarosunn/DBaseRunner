@@ -136,17 +136,16 @@ def test_load_own_tweets_with_mock_user_returns_correct_schema():
     reports = data["reports"]
     assert isinstance(reports, list) and len(reports) == 1
     report = reports[0]
-    assert "tweets" in report
-    assert isinstance(report["tweets"], list)
+    # envelope dedup (ledger #3): tweets live ONCE, in data.result — NOT also in
+    # the report. reports[0] keeps only server_timing.
+    assert "tweets" not in report
+    assert data["result"] == MOCK_TWEETS
     # server_timing block (fair-timing spec §3)
     st = report["server_timing"]
     assert isinstance(st["ms_fetch"], float) and st["ms_fetch"] >= 0
     assert st["ms_build"] == 0.0  # PG builds in-SQL, inside ms_fetch
     assert isinstance(st["server_total"], float)
     assert st["server_total"] + 1e-6 >= st["ms_fetch"] + st["ms_build"]  # invariant
-
-    # result is the tweets list
-    assert isinstance(data["result"], list)
 
 
 # ---------------------------------------------------------------------------

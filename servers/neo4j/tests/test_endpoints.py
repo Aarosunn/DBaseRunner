@@ -268,11 +268,19 @@ def test_load_own_tweets_reports_server_timing():
     with TestClient(app) as client:
         resp = client.post("/walker/load_own_tweets", headers=_auth())
     assert resp.status_code == 200
-    st = resp.json()["data"]["reports"][0]["server_timing"]
+    data = resp.json()["data"]
+    report = data["reports"][0]
+    st = report["server_timing"]
     assert isinstance(st["ms_fetch"], float) and st["ms_fetch"] >= 0
     assert isinstance(st["ms_build"], float) and st["ms_build"] >= 0
     assert isinstance(st["server_total"], float)
     assert st["server_total"] + 1e-6 >= st["ms_fetch"] + st["ms_build"]  # invariant
+    # envelope dedup (ledger #3): tweets live ONCE, in data.result — not in the report.
+    assert "tweets" not in report
+    assert data["result"] == [
+        {"id": "t1", "content": "hi", "author_username": "testuser",
+         "created_at": "2024-01-01T00:00:00", "like_count": 11, "likes": [], "comments": []}
+    ]
 
 
 # ---------------------------------------------------------------------------

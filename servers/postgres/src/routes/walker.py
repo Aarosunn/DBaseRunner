@@ -540,8 +540,10 @@ def load_own_tweets(body: dict = Body(default={}),
         row = cur.fetchone()
     ms_fetch = (time.perf_counter() - t0) * 1000  # json_agg round-trip (builds payload in-SQL)
     tweets = row["tweets"] or []
+    # Envelope dedup (ledger #3): the tweet list lives ONCE, in data.result. The
+    # report carries only server_timing — NOT a second copy of the tweets (which
+    # doubled response_bytes vs jac's single-copy envelope).
     report = {
-        "tweets": tweets,
         "server_timing": {
             "ms_fetch": round(ms_fetch, 4),
             "ms_build": 0.0,  # PG builds the payload in-SQL, inside ms_fetch

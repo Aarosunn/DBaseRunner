@@ -336,8 +336,9 @@ def load_own_tweets(
     payload = [t.report() for t in tweets]
     ms_build = (time.perf_counter() - t1) * 1000
 
+    # Envelope dedup (ledger #3): the tweet list lives ONCE, in data.result; the
+    # report carries only server_timing (no second copy that doubled response_bytes).
     report = {
-        "tweets": payload,
         "server_timing": {
             "ms_fetch": round(ms_fetch, 4),
             "ms_build": round(ms_build, 4),

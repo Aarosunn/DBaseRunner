@@ -107,7 +107,8 @@ def test_load_own_tweets_empty(client, registered_user):
     reports = body["data"]["reports"]
     assert len(reports) == 1
     r = reports[0]
-    assert "tweets" in r
+    # envelope dedup (ledger #3): tweets live ONCE, in data.result — not in the report.
+    assert "tweets" not in r
     # server_timing block (fair-timing spec §3): ms_build = .report() ORM hydration tax
     st = r["server_timing"]
     assert isinstance(st["ms_fetch"], float) and st["ms_fetch"] >= 0
@@ -137,8 +138,11 @@ def test_load_own_tweets_returns_all_own_tweets(client, registered_user):
     _seed_two_tweets(client)
     resp = client.post("/walker/load_own_tweets", headers=auth)
     assert resp.status_code == 200
-    tweets = resp.json()["data"]["result"]
+    body = resp.json()
+    tweets = body["data"]["result"]
     assert len(tweets) == 2                       # both returned, no predicate
+    # single-copy envelope (ledger #3): the report carries no second copy
+    assert "tweets" not in body["data"]["reports"][0]
     contents = {t["content"] for t in tweets}
     assert contents == {"[t_0000] high likes", "[t_0001] low likes"}
     for t in tweets:
