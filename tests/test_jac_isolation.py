@@ -38,10 +38,11 @@ pytestmark = pytest.mark.skipif(
 
 def test_fresh_user_is_root_isolated():
     """A freshly-registered user must NOT see another user's seeded tweets."""
-    # Small deterministic dataset with a known number of matching tweets.
+    # Small deterministic dataset. Post predicate-drop (#9) load_own_tweets returns
+    # ALL of the user's own tweets, so the expected count is n_tweets.
     spec = seed_gen.generate_point("fanout", 100)
-    expected = spec["expected_matching"]
-    assert expected > 0, "test dataset must contain matching tweets to be meaningful"
+    expected = spec["n_tweets"]
+    assert expected > 0, "test dataset must contain tweets to be meaningful"
 
     run = uuid.uuid4().hex[:8]
 
@@ -51,7 +52,7 @@ def test_fresh_user_is_root_isolated():
     a.seed(spec)
     a_tweets = a.load_own_tweets()["tweets"]
     assert len(a_tweets) == expected, (
-        f"user A should see its own {expected} matching tweets, got {len(a_tweets)}"
+        f"user A should see its own {expected} tweets, got {len(a_tweets)}"
     )
 
     # User B: register AFTER A was seeded, never seed B. With per-root isolation
