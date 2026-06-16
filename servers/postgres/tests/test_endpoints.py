@@ -165,3 +165,64 @@ def test_register_returns_token():
     assert resp.status_code == 200
     body = resp.json()
     assert "token" in body.get("data", {})
+
+
+# ---------------------------------------------------------------------------
+# Type-selectivity reconciliation (spec §4, §10): the like_count>10 predicate is
+# DROPPED from load_own_tweets (returns ALL own tweets); an optional `threshold`
+# body param is the FP seam (default off).
+# ---------------------------------------------------------------------------
+
+def _capture_load_sql(body):
+    app.dependency_overrides[get_current_user] = lambda: MOCK_USER
+    try:
+        with _patched_conn(fetchone_return={"tweets": []}) as cur:
+            with TestClient(app, raise_server_exceptions=True) as client:
+                client.post("/walker/load_own_tweets", json=body)
+        # the load query is the execute call selecting FROM tweets
+        for c in cur.execute.call_args_list:
+            sql = c.args[0]
+            if "FROM tweets" in sql:
+                return sql, c.args[1] if len(c.args) > 1 else ()
+        raise AssertionError("no load query executed")
+    finally:
+        app.dependency_overrides.pop(get_current_user, None)
+
+
+def test_load_own_tweets_default_has_no_like_count_predicate():
+    sql, params = _capture_load_sql({})
+    assert "like_count >" not in sql
+    assert tuple(params) == (MOCK_USER["id"],)
+
+
+def test_load_own_tweets_threshold_param_adds_predicate():
+    sql, params = _capture_load_sql({"threshold": 10})
+    assert "like_count >" in sql
+    assert 10 in tuple(params)
+
+
+# ---------------------------------------------------------------------------
+# seed_tweets creates Channel noise + channel_members and self-reports the count
+# (reconciliation spec §6.4).
+# ---------------------------------------------------------------------------
+
+def test_seed_tweets_creates_channels_and_reports_count():
+    body = {
+        "author_username": "bench_u",
+        "likers": [],
+        "tweets": [],
+        "channels": [{"key": "ch_00000", "name": "channel 0"},
+                     {"key": "ch_00001", "name": "channel 1"}],
+    }
+    # _upsert_user / channel INSERT ... RETURNING id all fetchone() -> give an id
+    with _patched_conn(fetchone_return={"id": 5}) as cur:
+        with TestClient(app, raise_server_exceptions=True) as client:
+            resp = client.post("/walker/seed_tweets", json=body)
+    assert resp.status_code == 200
+    report = resp.json()["data"]["reports"][0]
+    assert report["seeded_channels"] == 2
+    # a channel_members insert ran
+    joined = " ".join(c.args[0] for c in cur.execute.call_args_list
+                      if c.args) + " ".join(
+        c.args[0] for c in cur.executemany.call_args_list if c.args)
+    assert "channel_members" in joined

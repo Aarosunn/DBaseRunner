@@ -51,12 +51,41 @@ def seed_tweets_payload(spec: dict) -> dict:
 
     Drops the cross-backend `key` (it is embedded in `content`); keeps the liker
     pool and per-tweet content/created_at/like_count/likers/comments verbatim.
+    Carries the `channels` noise array for the type-selectivity neighborhood
+    (reconciliation spec §6.4); empty/absent on the fanout sweep.
     """
     keep = ("content", "created_at", "like_count", "likers", "comments")
     return {
         "likers": spec["likers"],
         "tweets": [{k: t[k] for k in keep} for t in spec["tweets"]],
+        "channels": spec.get("channels", []),
     }
+
+
+def extract_seeded_counts(body) -> dict:
+    """Best-effort {seeded_tweets, seeded_channels} from a seed_tweets response.
+
+    Tolerant (like extract_server_timing): digs through the jac/baseline envelopes
+    and returns {} when the server doesn't self-report counts — the harness's
+    channel guard then simply skips (reconciliation spec §6.4)."""
+    if not isinstance(body, dict):
+        return {}
+    candidates = [body]
+    data = body.get("data")
+    if isinstance(data, dict):
+        if isinstance(data.get("result"), dict):
+            candidates.append(data["result"])
+        reports = data.get("reports")
+        if isinstance(reports, list) and reports and isinstance(reports[0], dict):
+            candidates.append(reports[0])
+    reports = body.get("reports")
+    if isinstance(reports, list) and reports and isinstance(reports[0], dict):
+        candidates.append(reports[0])
+    for c in candidates:
+        if "seeded_channels" in c or "seeded_tweets" in c:
+            return {"seeded_tweets": c.get("seeded_tweets"),
+                    "seeded_channels": c.get("seeded_channels")}
+    return {}
 
 
 def extract_server_timing(body: dict):
@@ -142,14 +171,16 @@ class BackendBase(ABC):
         except requests.RequestException:
             return False
 
-    def seed(self, spec: dict) -> None:
+    def seed(self, spec: dict) -> dict:
         """Load one param-point spec into the store via POST /walker/seed_tweets,
         for the currently authenticated eval user (author_username = self._username
-        on baselines; identity from the JWT on jac)."""
+        on baselines; identity from the JWT on jac). Returns the server-reported
+        {seeded_tweets, seeded_channels} (best-effort; {} if not reported)."""
         body = seed_tweets_payload(spec)
         body["author_username"] = self._username
         resp = self.session.post(f"{self.base_url}/walker/seed_tweets", json=body)
         resp.raise_for_status()
+        return extract_seeded_counts(resp.json())
 
     def reset(self) -> None:
         """Best-effort full data wipe via POST /walker/clear_data.

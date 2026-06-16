@@ -273,3 +273,44 @@ def test_load_own_tweets_reports_server_timing():
     assert isinstance(st["ms_build"], float) and st["ms_build"] >= 0
     assert isinstance(st["server_total"], float)
     assert st["server_total"] + 1e-6 >= st["ms_fetch"] + st["ms_build"]  # invariant
+
+
+# ---------------------------------------------------------------------------
+# Type-selectivity reconciliation (spec §4, §10): the like_count>10 predicate is
+# DROPPED from load_own_tweets (the :POST edge-type pre-separates the channel
+# noise); `threshold` is the filter-pushdown seam (default off).
+# ---------------------------------------------------------------------------
+
+def _load_cypher():
+    for c in _mock_session.run.call_args_list:
+        if c.args and "[:POST]->(t:Tweet)" in c.args[0]:
+            return c
+    raise AssertionError("no load_own_tweets cypher executed")
+
+
+def test_load_own_tweets_cypher_has_no_predicate():
+    with TestClient(app) as client:
+        client.post("/walker/load_own_tweets", headers=_auth())
+    cypher = _load_cypher().args[0]
+    assert "like_count > 10" not in cypher
+    assert "WHERE t.like_count" not in cypher
+
+
+def test_load_own_tweets_threshold_param_adds_predicate():
+    with TestClient(app) as client:
+        client.post("/walker/load_own_tweets", headers=_auth(), json={"threshold": 10})
+    call = _load_cypher()
+    assert "like_count >" in call.args[0]
+    assert call.kwargs.get("threshold") == 10
+
+
+def test_seed_tweets_creates_channels_and_reports_count():
+    body = {"author_username": "bench_u", "likers": [], "tweets": [],
+            "channels": [{"key": "ch_00000", "name": "channel 0"},
+                         {"key": "ch_00001", "name": "channel 1"}]}
+    with TestClient(app) as client:
+        resp = client.post("/walker/seed_tweets", json=body)
+    assert resp.status_code == 200
+    assert resp.json()["data"]["reports"][0]["seeded_channels"] == 2
+    cyphers = " ".join(c.args[0] for c in _mock_session.run.call_args_list if c.args)
+    assert ":MEMBER" in cyphers and ":Channel" in cyphers

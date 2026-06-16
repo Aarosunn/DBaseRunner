@@ -2,65 +2,149 @@
  "likes_threshold": 10,
  "points": [
   {
-   "expected_matching": 25,
    "file": "fanout_100.json",
+   "n_channels": 0,
+   "n_tweets": 100,
    "param_value": 100,
+   "selectivity_mode": null,
    "sweep_type": "fanout"
   },
   {
-   "expected_matching": 63,
    "file": "fanout_250.json",
+   "n_channels": 0,
+   "n_tweets": 250,
    "param_value": 250,
+   "selectivity_mode": null,
    "sweep_type": "fanout"
   },
   {
-   "expected_matching": 125,
    "file": "fanout_500.json",
+   "n_channels": 0,
+   "n_tweets": 500,
    "param_value": 500,
+   "selectivity_mode": null,
    "sweep_type": "fanout"
   },
   {
-   "expected_matching": 188,
    "file": "fanout_750.json",
+   "n_channels": 0,
+   "n_tweets": 750,
    "param_value": 750,
+   "selectivity_mode": null,
    "sweep_type": "fanout"
   },
   {
-   "expected_matching": 250,
    "file": "fanout_1000.json",
+   "n_channels": 0,
+   "n_tweets": 1000,
    "param_value": 1000,
+   "selectivity_mode": null,
    "sweep_type": "fanout"
   },
   {
-   "expected_matching": 100,
-   "file": "selectivity_10.json",
+   "file": "selectivity_fixed-target_10.json",
+   "n_channels": 9000,
+   "n_tweets": 1000,
    "param_value": 10,
+   "selectivity_mode": "fixed-target",
    "sweep_type": "selectivity"
   },
   {
-   "expected_matching": 250,
-   "file": "selectivity_25.json",
-   "param_value": 25,
+   "file": "selectivity_fixed-target_20.json",
+   "n_channels": 4000,
+   "n_tweets": 1000,
+   "param_value": 20,
+   "selectivity_mode": "fixed-target",
    "sweep_type": "selectivity"
   },
   {
-   "expected_matching": 500,
-   "file": "selectivity_50.json",
+   "file": "selectivity_fixed-target_30.json",
+   "n_channels": 2333,
+   "n_tweets": 1000,
+   "param_value": 30,
+   "selectivity_mode": "fixed-target",
+   "sweep_type": "selectivity"
+  },
+  {
+   "file": "selectivity_fixed-target_50.json",
+   "n_channels": 1000,
+   "n_tweets": 1000,
    "param_value": 50,
+   "selectivity_mode": "fixed-target",
    "sweep_type": "selectivity"
   },
   {
-   "expected_matching": 750,
-   "file": "selectivity_75.json",
+   "file": "selectivity_fixed-target_75.json",
+   "n_channels": 333,
+   "n_tweets": 1000,
    "param_value": 75,
+   "selectivity_mode": "fixed-target",
    "sweep_type": "selectivity"
   },
   {
-   "expected_matching": 1000,
-   "file": "selectivity_100.json",
+   "file": "selectivity_fixed-target_100.json",
+   "n_channels": 0,
+   "n_tweets": 1000,
    "param_value": 100,
+   "selectivity_mode": "fixed-target",
+   "sweep_type": "selectivity"
+  },
+  {
+   "file": "selectivity_fixed-total_2.json",
+   "n_channels": 980,
+   "n_tweets": 20,
+   "param_value": 2,
+   "selectivity_mode": "fixed-total",
+   "sweep_type": "selectivity"
+  },
+  {
+   "file": "selectivity_fixed-total_5.json",
+   "n_channels": 950,
+   "n_tweets": 50,
+   "param_value": 5,
+   "selectivity_mode": "fixed-total",
+   "sweep_type": "selectivity"
+  },
+  {
+   "file": "selectivity_fixed-total_10.json",
+   "n_channels": 900,
+   "n_tweets": 100,
+   "param_value": 10,
+   "selectivity_mode": "fixed-total",
+   "sweep_type": "selectivity"
+  },
+  {
+   "file": "selectivity_fixed-total_20.json",
+   "n_channels": 800,
+   "n_tweets": 200,
+   "param_value": 20,
+   "selectivity_mode": "fixed-total",
+   "sweep_type": "selectivity"
+  },
+  {
+   "file": "selectivity_fixed-total_30.json",
+   "n_channels": 700,
+   "n_tweets": 300,
+   "param_value": 30,
+   "selectivity_mode": "fixed-total",
+   "sweep_type": "selectivity"
+  },
+  {
+   "file": "selectivity_fixed-total_50.json",
+   "n_channels": 500,
+   "n_tweets": 500,
+   "param_value": 50,
+   "selectivity_mode": "fixed-total",
+   "sweep_type": "selectivity"
+  },
+  {
+   "file": "selectivity_fixed-total_75.json",
+   "n_channels": 250,
+   "n_tweets": 750,
+   "param_value": 75,
+   "selectivity_mode": "fixed-total",
    "sweep_type": "selectivity"
   }
  ],
- "spec_version": 2
+ "spec_version": 3
 }

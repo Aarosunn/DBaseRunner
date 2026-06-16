@@ -103,6 +103,76 @@ class TestRender:
             assert p.exists() and p.stat().st_size > 0
 
 
+def _write_csv_mode(path, rows):
+    fields = ["backend", "sweep_type", "selectivity_mode", "param_value",
+              "trial_num", "latency_ms", "response_bytes", "timestamp", "warmup"]
+    with open(path, "w", newline="") as f:
+        w = csv.DictWriter(f, fieldnames=fields)
+        w.writeheader()
+        for r in rows:
+            w.writerow(r)
+
+
+def _row_mode(backend, mode, param, lat, byts, warmup=0):
+    return {"backend": backend, "sweep_type": "selectivity", "selectivity_mode": mode,
+            "param_value": param, "trial_num": 0, "latency_ms": lat,
+            "response_bytes": byts, "timestamp": 0.0, "warmup": warmup}
+
+
+class TestSelectivityModeBucketing:
+    def test_aggregate_buckets_selectivity_by_mode(self):
+        rows = [_row_mode("jac", "fixed-target", 50, 2.0, 100),
+                _row_mode("jac", "fixed-total", 50, 9.0, 100)]
+        agg = plot.aggregate(rows)
+        assert "selectivity_fixed-target" in agg
+        assert "selectivity_fixed-total" in agg
+        assert agg["selectivity_fixed-target"]["jac"][0]["median_ms"] == 2.0
+        assert agg["selectivity_fixed-total"]["jac"][0]["median_ms"] == 9.0
+
+    def test_modeless_selectivity_stays_back_compat_key(self):
+        rows = [_row("jac", "selectivity", 50, 2.0, 100, 0)]
+        agg = plot.aggregate(rows)
+        assert "selectivity" in agg
+
+    def test_axis_label_is_type_selectivity(self):
+        assert "Type selectivity" in plot._axis_label("selectivity_fixed-target")
+        assert "Type selectivity" in plot._axis_label("selectivity_fixed-total")
+
+
+class TestFig3Render:
+    def test_fixed_target_renders_fig3_type_selectivity(self, tmp_path):
+        rows = [_row_mode("jac", "fixed-target", p, 2.0, 100 * p)
+                for p in (10, 20, 30, 50, 75, 100)]
+        _write_csv_mode(tmp_path / "jac.csv", rows)
+        agg = plot.aggregate(plot.read_results(str(tmp_path)))
+        written = plot.render(agg, str(tmp_path / "figs"))
+        names = {p.name for p in written}
+        assert "fig3_type_selectivity.png" in names
+
+    def test_fixed_total_renders_fig3_repro(self, tmp_path):
+        rows = [_row_mode("jac", "fixed-total", p, float(p), 100 * p)
+                for p in (2, 5, 10, 20, 30, 50, 75)]
+        _write_csv_mode(tmp_path / "jac.csv", rows)
+        agg = plot.aggregate(plot.read_results(str(tmp_path)))
+        written = plot.render(agg, str(tmp_path / "figs"))
+        names = {p.name for p in written}
+        assert "fig3_repro.png" in names
+
+    def test_both_modes_render_confound_overlay(self, tmp_path):
+        rows = []
+        for p in (10, 20, 30, 50, 75, 100):
+            rows.append(_row_mode("jac", "fixed-target", p, 2.0, 100))
+        for p in (2, 5, 10, 20, 30, 50, 75):
+            rows.append(_row_mode("jac", "fixed-total", p, float(p), 100))
+        _write_csv_mode(tmp_path / "jac.csv", rows)
+        agg = plot.aggregate(plot.read_results(str(tmp_path)))
+        written = plot.render(agg, str(tmp_path / "figs"))
+        names = {p.name for p in written}
+        assert "fig3_repro_confound.png" in names
+        for pth in written:
+            assert pth.exists() and pth.stat().st_size > 0
+
+
 class TestCaption:
     """H3: caption must reflect the actual run (from _meta.json), not a
     hardcoded 'smoke run / 2 trials' literal."""

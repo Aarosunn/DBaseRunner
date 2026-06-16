@@ -141,7 +141,7 @@ class TestTimedCallTiming:
 class TestCsvSchemaTimingColumns:
     def test_fieldnames_include_timing_columns_in_order(self):
         assert CSV_FIELDNAMES == [
-            "backend", "sweep_type", "param_value", "trial_num",
+            "backend", "sweep_type", "selectivity_mode", "param_value", "trial_num",
             "latency_ms", "server_total_ms", "ms_fetch", "ms_build", "network_ms",
             "response_bytes", "timestamp", "warmup",
         ]
@@ -171,6 +171,21 @@ class TestRunSweepTimingColumns:
     def test_negative_network_ms_not_clamped(self):
         rows = self._rows(latency=2.0, server_total=5.0)
         assert all(r["network_ms"] == -3.0 for r in rows)
+
+
+class TestRunSweepSelectivityMode:
+    def test_selectivity_mode_threaded_into_rows(self):
+        writer, rows = accumulating_writer()
+        run_sweep("jac", "selectivity", [10], MagicMock(return_value=trial()), writer,
+                  warmup_count=1, trials=1, selectivity_mode="fixed-target",
+                  timestamp_fn=lambda: 0.0)
+        assert all(r["selectivity_mode"] == "fixed-target" for r in rows)
+
+    def test_selectivity_mode_defaults_none_for_fanout(self):
+        writer, rows = accumulating_writer()
+        run_sweep("jac", "fanout", [100], MagicMock(return_value=trial()), writer,
+                  warmup_count=1, trials=1, timestamp_fn=lambda: 0.0)
+        assert all(r["selectivity_mode"] is None for r in rows)
 
 
 # ── run_sweep row counts ──────────────────────────────────────────────────────

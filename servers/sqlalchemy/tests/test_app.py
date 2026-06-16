@@ -115,29 +115,62 @@ def test_load_own_tweets_empty(client, registered_user):
     assert isinstance(st["server_total"], float)
     assert st["server_total"] + 1e-6 >= st["ms_fetch"] + st["ms_build"]  # invariant
 
-def test_load_own_tweets_applies_like_count_predicate(client, registered_user):
-    # load_own_tweets now applies the benchmark predicate like_count > 10 server-side
-    # (seed-design-spec §2). Seed one matching tweet and one below threshold; only the
-    # matching one must come back, carrying like_count in the payload.
-    auth = {"Authorization": f"Bearer {registered_user['username']}"}
+def _seed_two_tweets(client):
     client.post("/walker/seed_tweets", json={
         "author_username": "testuser",
         "likers": ["liker_0", "liker_1"],
         "tweets": [
-            {"content": "[t_0000] matching", "created_at": "2026-01-01T00:00:00Z",
+            {"content": "[t_0000] high likes", "created_at": "2026-01-01T00:00:00Z",
              "like_count": 14, "likers": ["liker_0", "liker_1"],
              "comments": [{"author": "liker_0", "content": "nice",
                            "created_at": "2026-01-01T00:00:30Z"}]},
-            {"content": "[t_0001] below threshold", "created_at": "2026-01-01T00:01:00Z",
+            {"content": "[t_0001] low likes", "created_at": "2026-01-01T00:01:00Z",
              "like_count": 3, "likers": ["liker_0"], "comments": []},
         ],
     })
+
+
+def test_load_own_tweets_returns_all_own_tweets(client, registered_user):
+    # Reconciliation spec §4: the like_count>10 predicate is GONE — load_own_tweets
+    # returns ALL of the caller's tweets regardless of like_count.
+    auth = {"Authorization": f"Bearer {registered_user['username']}"}
+    _seed_two_tweets(client)
     resp = client.post("/walker/load_own_tweets", headers=auth)
     assert resp.status_code == 200
     tweets = resp.json()["data"]["result"]
-    assert len(tweets) == 1                       # below-threshold tweet filtered out
-    t = tweets[0]
-    assert t["content"] == "[t_0000] matching"
-    assert t["like_count"] == 14
-    for key in ("id", "author_username", "created_at", "likes", "comments"):
-        assert key in t
+    assert len(tweets) == 2                       # both returned, no predicate
+    contents = {t["content"] for t in tweets}
+    assert contents == {"[t_0000] high likes", "[t_0001] low likes"}
+    for t in tweets:
+        for key in ("id", "author_username", "created_at", "like_count", "likes", "comments"):
+            assert key in t
+
+
+def test_load_own_tweets_threshold_param_filters(client, registered_user):
+    # FP seam (spec §10): an explicit threshold filters server-side. Default off.
+    auth = {"Authorization": f"Bearer {registered_user['username']}"}
+    _seed_two_tweets(client)
+    resp = client.post("/walker/load_own_tweets", headers=auth, json={"threshold": 10})
+    assert resp.status_code == 200
+    tweets = resp.json()["data"]["result"]
+    assert len(tweets) == 1
+    assert tweets[0]["content"] == "[t_0000] high likes"
+
+
+def test_seed_tweets_creates_channels_and_reports_count(client, registered_user):
+    # Channel noise for the type-selectivity neighborhood (spec §6.4): seeded but
+    # never returned by load_own_tweets (TPT pre-separates the type).
+    auth = {"Authorization": f"Bearer {registered_user['username']}"}
+    resp = client.post("/walker/seed_tweets", json={
+        "author_username": "testuser",
+        "likers": [],
+        "tweets": [],
+        "channels": [{"key": "ch_00000", "name": "channel 0"},
+                     {"key": "ch_00001", "name": "channel 1"},
+                     {"key": "ch_00002", "name": "channel 2"}],
+    })
+    assert resp.status_code == 200
+    assert resp.json()["data"]["reports"][0]["seeded_channels"] == 3
+    # load_own_tweets must NOT return channels
+    load = client.post("/walker/load_own_tweets", headers=auth)
+    assert load.json()["data"]["result"] == []

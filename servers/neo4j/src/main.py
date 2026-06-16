@@ -165,22 +165,31 @@ def create_channel(body: CreateChannel, request: Request):
 
 @app.post("/walker/load_own_tweets")
 @app.post("/function/load_own_tweets")
-def load_own_tweets(request: Request):
+def load_own_tweets(request: Request, body: Optional[dict] = Body(default=None)):
     # server_total = handler entry → return (includes in-handler _bearer_username
     # auth resolve → lands in the residual, fair-timing spec §3).
+    # Reconciliation spec §4: NO like_count predicate — the :POST edge-type already
+    # pre-separates the :MEMBER->:Channel noise, so this returns ALL own tweets.
+    # `threshold` is the filter-pushdown seam (spec §10): default off; pass
+    # {"threshold": k} for the future FP sweep (#21) → binds into a Cypher WHERE.
     t_entry = time.perf_counter()
     uid = _bearer_username(request)
+    threshold = (body or {}).get("threshold")
+    predicate = "WHERE t.like_count > $threshold " if threshold is not None else ""
     cypher = (
         "MATCH (p:Profile {jac_id: $uid})-[:POST]->(t:Tweet) "
-        "WHERE t.like_count > 10 "
+        + predicate +
         "RETURN t.jac_id AS id, t.content AS content, "
         "       t.author_username AS author_username, "
         "       t.created_at AS created_at, t.like_count AS like_count, "
         "       t.likes AS likes, t.comments AS comments"
     )
+    params = {"uid": uid}
+    if threshold is not None:
+        params["threshold"] = threshold
     t0 = time.perf_counter()
     with driver.session() as s:
-        rows = s.run(cypher, uid=uid).data()
+        rows = s.run(cypher, **params).data()
     ms_fetch = (time.perf_counter() - t0) * 1000.0  # cypher run + .data()
 
     t1 = time.perf_counter()
@@ -247,6 +256,10 @@ def seed_tweets(body: Optional[dict] = Body(default=None)):
         }
         for i, tw in enumerate(body.get("tweets", []))
     ]
+    # Channel noise for the type-selectivity neighborhood (spec §6.4). The :MEMBER
+    # edge-type keeps it off the :POST path, so load_own_tweets never traverses it
+    # (the optimized backend pre-separates the type via edge-type).
+    channels = body.get("channels", [])
     with driver.session() as s:
         s.run(
             """
@@ -267,7 +280,24 @@ def seed_tweets(body: Optional[dict] = Body(default=None)):
             author=author,
             tweets=tweets_param,
         )
-    return _resp({"success": True, "seeded": len(tweets_param)})
+        if channels:
+            s.run(
+                """
+                MERGE (p:Profile {jac_id: $author})
+                  ON CREATE SET p.username = $author, p.handle = $author, p.bio = ''
+                WITH p
+                UNWIND $channels AS ch
+                CREATE (p)-[:MEMBER]->(:Channel {
+                    jac_id: $author + '_c_' + ch.key,
+                    name: ch.name
+                })
+                """,
+                author=author,
+                channels=channels,
+            )
+    return _resp({"success": True, "seeded": len(tweets_param),
+                  "seeded_tweets": len(tweets_param),
+                  "seeded_channels": len(channels)})
 
 
 # ---------------------------------------------------------------------------

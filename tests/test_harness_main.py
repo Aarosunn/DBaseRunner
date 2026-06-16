@@ -118,27 +118,53 @@ class TestParser:
             harness._build_parser().parse_args(
                 ["--backend", "jac", "--url", "http://x", "--user-id", "x"])
 
+    def test_selectivity_mode_defaults_fixed_target(self):
+        args = harness._build_parser().parse_args(["--backend", "jac", "--url", "http://x"])
+        assert args.selectivity_mode == "fixed-target"
+
+    def test_selectivity_mode_accepts_fixed_total(self):
+        args = harness._build_parser().parse_args(
+            ["--backend", "jac", "--url", "http://x", "--selectivity-mode", "fixed-total"])
+        assert args.selectivity_mode == "fixed-total"
+
+    def test_selectivity_mode_rejects_bogus(self):
+        with pytest.raises(SystemExit):
+            harness._build_parser().parse_args(
+                ["--backend", "jac", "--url", "http://x", "--selectivity-mode", "bogus"])
+
 
 # ── load_point_spec ───────────────────────────────────────────────────────────
 
 class TestLoadPointSpec:
-    def test_reads_existing_spec(self, tmp_path):
+    def test_reads_existing_fanout_spec(self, tmp_path):
         seed_gen.write_all(str(tmp_path))
         spec = harness.load_point_spec(str(tmp_path), "fanout", 250)
-        assert spec["expected_matching"] == 63
+        assert spec["n_tweets"] == 250
+        assert spec["n_channels"] == 0
+
+    def test_reads_selectivity_spec_by_mode(self, tmp_path):
+        seed_gen.write_all(str(tmp_path))
+        spec = harness.load_point_spec(str(tmp_path), "selectivity", 10, "fixed-target")
+        assert spec["selectivity_mode"] == "fixed-target"
+        assert spec["n_tweets"] == 1000
+        assert spec["n_channels"] == 9000
 
     def test_missing_spec_system_exits(self, tmp_path):
         with pytest.raises(SystemExit, match="seed spec not found"):
             harness.load_point_spec(str(tmp_path), "fanout", 999)
 
 
-# ── verify_seed (§1.4) ────────────────────────────────────────────────────────
+# ── verify_seed (spec §6.4) — predicate dropped: ALL own tweets returned ──────
 
-def _spec(matching=2):
+def _spec(n_tweets=2, n_channels=0):
+    # v3 verify reads n_tweets (count of ALL own tweets) + the full key set off
+    # spec["tweets"]; there is no expected_matching / threshold anymore.
     return {
-        "expected_matching": matching,
+        "n_tweets": n_tweets,
+        "n_channels": n_channels,
         "likes_threshold": 10,
-        "expected_matching_keys": [f"t_{i:04d}" for i in range(matching)],
+        "likers": [f"liker_{i:03d}" for i in range(32)],
+        "tweets": [{"key": f"t_{i:04d}"} for i in range(n_tweets)],
     }
 
 
@@ -156,20 +182,21 @@ def _tweet(key, like_count=14):
 
 
 class TestVerifySeed:
-    def test_passes_on_exact_match(self):
+    def test_passes_on_all_tweets_returned(self):
         b = _backend_returning([_tweet("t_0000"), _tweet("t_0001")])
         harness.verify_seed(b, _spec(2))   # no raise
 
     def test_fails_on_count_mismatch(self):
+        # predicate gone: returning fewer than n_tweets is a partial-seed failure
         b = _backend_returning([_tweet("t_0000")])
         with pytest.raises(SystemExit, match="expected 2"):
             harness.verify_seed(b, _spec(2))
 
-    def test_fails_on_sub_threshold_like_count(self):
+    def test_low_like_count_tweet_is_fine_now(self):
+        # like_count no longer gates the result set; a 0-like tweet must NOT fail.
         b = _backend_returning([_tweet("t_0000", like_count=14),
-                                _tweet("t_0001", like_count=9)])
-        with pytest.raises(SystemExit, match="like_count"):
-            harness.verify_seed(b, _spec(2))
+                                _tweet("t_0001", like_count=0)])
+        harness.verify_seed(b, _spec(2))   # no raise
 
     def test_fails_on_key_set_mismatch(self):
         b = _backend_returning([_tweet("t_0000"), _tweet("t_9999")])
@@ -178,8 +205,7 @@ class TestVerifySeed:
 
     def test_fails_on_empty_likes_when_like_count_positive(self):
         # jac detached-liker risk (HARNESS_REVIEW H1): the scalar like_count says
-        # 14 but the likes array came back empty -> thin payload that the old
-        # verify (count + threshold + keys only) waved through.
+        # 14 but the likes array came back empty -> thin payload.
         b = _backend_returning([
             {"content": "[t_0000] body", "like_count": 14, "likes": [],
              "comments": [], "author_username": "u", "created_at": "t"}])
@@ -197,9 +223,9 @@ class TestVerifySeed:
         # Generator guarantee is len(likes) == min(like_count, pool_size); if the
         # liker pool were smaller than like_count, the cap (not like_count) is
         # authoritative. Pool of 5, like_count 14 -> exactly 5 likes is correct.
-        spec = {"expected_matching": 1, "likes_threshold": 10,
-                "expected_matching_keys": ["t_0000"],
-                "likers": [f"l{i}" for i in range(5)]}
+        spec = {"n_tweets": 1, "n_channels": 0, "likes_threshold": 10,
+                "likers": [f"l{i}" for i in range(5)],
+                "tweets": [{"key": "t_0000"}]}
         b = _backend_returning([
             {"content": "[t_0000] body", "like_count": 14,
              "likes": [f"l{i}" for i in range(5)], "comments": [],
@@ -240,8 +266,8 @@ class TestMetadata:
 # ── mocked main() integration: empty payload + setup flow (§1.6, §2, §7) ──────
 
 class FakeBackend:
-    """Standalone backend double for main(): no real HTTP. Simulates the
-    server-side like_count>K predicate so verify_seed passes against real specs."""
+    """Standalone backend double for main(): no real HTTP. The predicate is gone —
+    load_own_tweets returns ALL of the eval user's seeded tweets."""
     def __init__(self, base_url):
         self.base_url = base_url.rstrip("/")
         self.session = MagicMock()
@@ -251,7 +277,7 @@ class FakeBackend:
         self.session.post.return_value = resp
         self.session.headers = {}
         self._username = None
-        self._data = {}          # username -> matching tweets (per-user isolation)
+        self._data = {}          # username -> all seeded tweets (per-user isolation)
         self.ensure_calls = []
 
     def health(self):
@@ -265,9 +291,9 @@ class FakeBackend:
         self._username = username
 
     def seed(self, spec):
-        # mimic the server predicate: only like_count > threshold are returned later
-        self._data[self._username] = [
-            t for t in spec["tweets"] if t["like_count"] > spec["likes_threshold"]]
+        # no predicate: store every seeded tweet; channels are noise (not returned).
+        self._data[self._username] = list(spec["tweets"])
+        return {"seeded_tweets": spec["n_tweets"], "seeded_channels": spec["n_channels"]}
 
     def load_own_tweets(self):
         return {"tweets": [

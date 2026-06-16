@@ -303,24 +303,33 @@ def create_channel(
 
 @router.post("/load_own_tweets")
 def load_own_tweets(
+    body: Optional[dict] = Body(default=None),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    # Mirrors Jac's `walker load_own_tweets`: returns only the caller's own tweets
-    # (no follow-traversal). server_timing (fair-timing spec §3): ms_fetch = SQL
-    # round-trip; ms_build = per-tweet .report() ORM hydration (the tax Jac avoids);
-    # server_total = handler entry → return.
+    # Mirrors Jac's `walker load_own_tweets`: returns ALL of the caller's own tweets
+    # (no follow-traversal, NO like_count predicate — reconciliation spec §4).
+    # `threshold` is the filter-pushdown seam (spec §10): default off; pass
+    # {"threshold": k} for the future FP sweep (#21) — it binds into the WHERE and
+    # pushes down to the index. server_timing (fair-timing spec §3): ms_fetch = SQL
+    # round-trip; ms_build = per-tweet .report() ORM hydration (the tax Jac avoids).
     t_entry = time.perf_counter()
-    tweets = db.execute(
+    threshold = (body or {}).get("threshold")
+    stmt = (
         select(Tweet)
-        .where(Tweet.author_id == current_user.id, Tweet.like_count > 10)
+        .where(Tweet.author_id == current_user.id)
         .options(
             joinedload(Tweet.author),
             selectinload(Tweet.likes),
             selectinload(Tweet.comments),
         )
-        .order_by(Tweet.created_at.desc())
-    ).unique().scalars().all()
+        # No ORDER BY: jac/neo4j return unordered and the Phase-5 oracle is a multiset
+        # compare, so a sort here is asymmetric work (sqla would pay it; the graph
+        # backends don't) — review fix.
+    )
+    if threshold is not None:
+        stmt = stmt.where(Tweet.like_count > threshold)
+    tweets = db.execute(stmt).unique().scalars().all()
     ms_fetch = (time.perf_counter() - t_entry) * 1000
 
     t1 = time.perf_counter()
@@ -444,8 +453,21 @@ def seed_tweets(
                                tweet_id=tweet_id,
                                created_at=_seed_parse_ts(com["created_at"])))
 
+    # Channel noise for the type-selectivity neighborhood (spec §6.4). Polymorphic
+    # STI is the future unoptimized variant; here (optimized) channels live in their
+    # own table, so load_own_tweets never touches them.
+    channels = body.get("channels", [])
+    for ch in channels:
+        new_channel = Channel(name=ch.get("name", ch.get("key", "")), description="")
+        db.add(new_channel)
+        db.flush()
+        db.execute(channel_members_table.insert().values(
+            user_id=author.id, channel_id=new_channel.id))
+
     db.commit()
-    return singleton_response({"success": True, "seeded": len(tweets)})
+    return singleton_response({"success": True, "seeded": len(tweets),
+                               "seeded_tweets": len(tweets),
+                               "seeded_channels": len(channels)})
 
 
 # ---------------------------------------------------------------------------

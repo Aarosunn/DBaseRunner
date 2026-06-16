@@ -35,6 +35,7 @@ from backends.base import extract_server_timing
 CSV_FIELDNAMES = [
     "backend",
     "sweep_type",
+    "selectivity_mode",  # "fixed-target" | "fixed-total" for selectivity; blank otherwise
     "param_value",
     "trial_num",
     "latency_ms",        # client_total
@@ -47,12 +48,28 @@ CSV_FIELDNAMES = [
     "warmup",
 ]
 
+# Selectivity points are MODE-dependent (selectivity-type-reconciliation spec §5):
+# fixed-target (default) holds n_tweets=1000; fixed-total mirrors the published
+# fig6 points exactly. The actual list for a run is chosen by --selectivity-mode.
+SELECTIVITY_POINTS = {
+    "fixed-target": [10, 20, 30, 50, 75, 100],
+    "fixed-total":  [2, 5, 10, 20, 30, 50, 75],
+}
+DEFAULT_SELECTIVITY_MODE = "fixed-target"
+
 # Default sweeps run by --sweep. hop_depth is Phase 4.5 (load_extended_feed) and is
-# deliberately NOT here — it requires a follows graph (seed-design-spec §10).
+# deliberately NOT here — it requires a follows graph (seed-design-spec §10). The
+# selectivity entry carries the default-mode points; main() overrides per
+# --selectivity-mode. SWEEPS.keys() is the canonical sweep-name set.
 SWEEPS = {
     "fanout":      [100, 250, 500, 750, 1000],
-    "selectivity": [10, 25, 50, 75, 100],
+    "selectivity": SELECTIVITY_POINTS[DEFAULT_SELECTIVITY_MODE],
 }
+
+
+def selectivity_points(selectivity_mode):
+    """Param values for the selectivity sweep under the given mode (spec §5)."""
+    return SELECTIVITY_POINTS[selectivity_mode]
 
 # Reserved for Phase 4.5 — do not implement here (HARNESS_REBUILD Phase 4.5).
 PHASE_4_5_SWEEPS = {"hop_depth": [1, 2, 3]}
@@ -98,11 +115,13 @@ def timed_call(session, url, payload, extract_timing=extract_server_timing):
     }
 
 
-def _trial_row(backend_name, sweep_type, param_value, trial_num, result, timestamp, warmup):
+def _trial_row(backend_name, sweep_type, param_value, trial_num, result, timestamp,
+               warmup, selectivity_mode=None):
     """Build one CSV row from a timed_fn result dict (fair-timing spec §4).
 
     network_ms = latency_ms − server_total_ms; negatives preserved (NOT clamped),
-    blank when the server emitted no server_timing.
+    blank when the server emitted no server_timing. selectivity_mode is None for
+    non-selectivity sweeps (DictWriter writes it blank).
     """
     server_total = result["server_total_ms"]
     network_ms = (round(result["latency_ms"] - server_total, 3)
@@ -110,6 +129,7 @@ def _trial_row(backend_name, sweep_type, param_value, trial_num, result, timesta
     return {
         "backend": backend_name,
         "sweep_type": sweep_type,
+        "selectivity_mode": selectivity_mode,
         "param_value": param_value,
         "trial_num": trial_num,
         "latency_ms": round(result["latency_ms"], 3),
@@ -134,6 +154,7 @@ def run_sweep(
     clear_fn=None,
     timestamp_fn=None,
     setup_fn=None,
+    selectivity_mode=None,
 ):
     """Run warmup + timed trials for one sweep type, writing one CSV row per call.
 
@@ -164,7 +185,7 @@ def run_sweep(
             result = timed_fn(param_value)
             writer.writerow(
                 _trial_row(backend_name, sweep_type, param_value, i, result,
-                           timestamp_fn(), warmup=1))
+                           timestamp_fn(), warmup=1, selectivity_mode=selectivity_mode))
 
         for i in range(trials):
             if clear_fn is not None:
@@ -172,7 +193,7 @@ def run_sweep(
             result = timed_fn(param_value)
             writer.writerow(
                 _trial_row(backend_name, sweep_type, param_value, i, result,
-                           timestamp_fn(), warmup=0))
+                           timestamp_fn(), warmup=0, selectivity_mode=selectivity_mode))
 
 
 # ── seed/verify control plane (untimed) ───────────────────────────────────────
@@ -185,9 +206,14 @@ def check_sweep_supported(sweep_type):
             "Remove it from --sweep.")
 
 
-def load_point_spec(seed_dir, sweep_type, param_value):
-    """Load one pre-generated neutral seed spec (seed-design-spec §3)."""
-    path = Path(seed_dir) / f"{sweep_type}_{param_value}.json"
+def load_point_spec(seed_dir, sweep_type, param_value, selectivity_mode=None):
+    """Load one pre-generated neutral seed spec (reconciliation spec §6.2). Selectivity
+    points are mode-namespaced (selectivity_{mode}_{param}.json)."""
+    if sweep_type == "selectivity":
+        fname = f"selectivity_{selectivity_mode}_{param_value}.json"
+    else:
+        fname = f"{sweep_type}_{param_value}.json"
+    path = Path(seed_dir) / fname
     if not path.exists():
         raise SystemExit(
             f"seed spec not found: {path}; run `python seed_gen.py --out {seed_dir}`")
@@ -209,25 +235,21 @@ def guard_not_already_seeded(backend, username):
 
 
 def verify_seed(backend, spec):
-    """Hard-fail post-seed verification (harness-fix-spec §1.4): exact matching
-    count, every returned tweet above threshold, exact matching-key set."""
+    """Hard-fail post-seed verification (reconciliation spec §6.4). The like_count>K
+    predicate is gone, so load_own_tweets returns ALL of the eval user's tweets:
+    verify the full count (n_tweets) and the full key set, plus the H1 likes-cardinality
+    guard. Channel-noise presence is verified by the adapter against the seed response."""
     tweets = backend.load_own_tweets()["tweets"]
-    expected = spec["expected_matching"]
+    expected = spec["n_tweets"]
     if len(tweets) != expected:
         raise SystemExit(
-            f"seed verify failed: expected {expected} matching tweets, "
-            f"got {len(tweets)}")
+            f"seed verify failed: expected {expected} own tweets, got {len(tweets)}")
 
-    threshold = spec["likes_threshold"]
     # The liker pool caps how many distinct likes a tweet can carry. The seed
     # generator guarantees len(likers) == min(like_count, pool_size); with no
     # pool in the spec, fall back to like_count (no cap).
     pool_size = len(spec.get("likers") or [])
     for t in tweets:
-        if not t["like_count"] > threshold:
-            raise SystemExit(
-                f"seed verify failed: tweet like_count {t['like_count']} "
-                f"is not > threshold {threshold}")
         expected_likes = min(t["like_count"], pool_size) if pool_size else t["like_count"]
         if len(t["likes"]) != expected_likes:
             raise SystemExit(
@@ -236,13 +258,28 @@ def verify_seed(backend, spec):
                 f"likes payload (jac detached-liker risk, HARNESS_REVIEW H1)")
 
     got_keys = {_content_key(t["content"]) for t in tweets}
-    expected_keys = set(spec["expected_matching_keys"])
+    expected_keys = {t["key"] for t in spec["tweets"]}
     if got_keys != expected_keys:
         missing = expected_keys - got_keys
         extra = got_keys - expected_keys
         raise SystemExit(
             f"seed verify failed: key set mismatch (missing={sorted(missing)[:5]}, "
             f"extra={sorted(str(e) for e in extra)[:5]})")
+
+
+def verify_seeded_channels(seed_response, spec):
+    """If the seed endpoint self-reports a channel count, assert it matches the spec
+    (reconciliation spec §6.4 — don't run a timed point on a partially-seeded
+    neighborhood). Tolerant: skip silently when the backend reports nothing."""
+    if not isinstance(seed_response, dict):
+        return
+    reported = seed_response.get("seeded_channels")
+    if reported is None:
+        return
+    if reported != spec["n_channels"]:
+        raise SystemExit(
+            f"seed verify failed: server seeded {reported} channels, "
+            f"expected {spec['n_channels']}")
 
 
 def _git_sha():
@@ -268,6 +305,7 @@ def write_run_metadata(out_dir, args, *, started_at, finished_at, harness_git_sh
         "warmup": args.warmup,
         "trials": args.trials,
         "sweeps": list(args.sweep),
+        "selectivity_mode": args.selectivity_mode,
         "cold_l1": cold_l1,
         "started_at": started_at,
         "finished_at": finished_at,
@@ -304,6 +342,12 @@ def _build_parser():
                    choices=list(SWEEPS.keys()) + list(PHASE_4_5_SWEEPS.keys()),
                    default=list(SWEEPS.keys()),
                    help="Sweep types to run (default: fanout selectivity)")
+    p.add_argument("--selectivity-mode", dest="selectivity_mode",
+                   choices=list(SELECTIVITY_POINTS.keys()),
+                   default=DEFAULT_SELECTIVITY_MODE,
+                   help="Type-selectivity neighborhood mode (reconciliation spec §5): "
+                        "fixed-target (default, n_tweets=1000 const) or fixed-total "
+                        "(total=1000 const, reproduces the old fig6 points).")
     p.add_argument("--trials", type=int, default=TRIALS)
     p.add_argument("--warmup", type=int, default=WARMUP_COUNT)
     p.add_argument("--out", default="results",
@@ -349,17 +393,22 @@ def main(argv=None):
         writer.writeheader()
 
         for sweep_type in args.sweep:
-            param_values = SWEEPS[sweep_type]
+            mode = args.selectivity_mode if sweep_type == "selectivity" else None
+            param_values = (selectivity_points(mode) if sweep_type == "selectivity"
+                            else SWEEPS[sweep_type])
 
-            def setup_fn(param_value, _sweep=sweep_type):
-                spec = load_point_spec(args.seed_dir, _sweep, param_value)
-                username = f"bench_{args.run_id}_{_sweep}_{param_value}"
+            def setup_fn(param_value, _sweep=sweep_type, _mode=mode):
+                spec = load_point_spec(args.seed_dir, _sweep, param_value, _mode)
+                suffix = (f"selectivity_{_mode}_{param_value}"
+                          if _sweep == "selectivity" else f"{_sweep}_{param_value}")
+                username = f"bench_{args.run_id}_{suffix}"
                 if args.skip_seed:
                     backend.auth(username, args.password)
                 else:
                     backend.ensure_user(username, args.password)
                     guard_not_already_seeded(backend, username)
-                    backend.seed(spec)
+                    seed_resp = backend.seed(spec)
+                    verify_seeded_channels(seed_resp, spec)
                 verify_seed(backend, spec)
 
             def timed_fn(param_value):
@@ -373,8 +422,10 @@ def main(argv=None):
                 trials=args.trials,
                 clear_fn=clear_fn,
                 setup_fn=setup_fn,
+                selectivity_mode=mode,
             )
-            print(f"  {sweep_type}: done", flush=True)
+            label = f"{sweep_type} [{mode}]" if mode else sweep_type
+            print(f"  {label}: done", flush=True)
 
     finished_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     write_run_metadata(out_dir, args, started_at=started_at, finished_at=finished_at,

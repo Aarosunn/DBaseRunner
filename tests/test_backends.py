@@ -13,7 +13,7 @@ import pytest
 
 
 from backends import JacBackend, PostgresBackend, SQLAlchemyBackend, Neo4jBackend
-from backends.base import extract_server_timing
+from backends.base import extract_server_timing, extract_seeded_counts
 
 
 def fake_resp(json_body=None, content=b"", status=200, raise_exc=None):
@@ -227,6 +227,10 @@ class TestHealth:
 
 SPEC = {
     "likers": ["liker_000", "liker_001"],
+    "n_tweets": 1,
+    "n_channels": 2,
+    "channels": [{"key": "ch_00000", "name": "channel 0"},
+                 {"key": "ch_00001", "name": "channel 1"}],
     "tweets": [
         {"key": "t_0000", "content": "[t_0000] hi", "created_at": "2026-01-01T00:00:00Z",
          "like_count": 14, "likers": ["liker_000"], "comments": []},
@@ -235,7 +239,7 @@ SPEC = {
 
 
 class TestSeed:
-    def test_baseline_seed_includes_author_username(self):
+    def test_baseline_seed_includes_author_username_and_channels(self):
         b = PostgresBackend("http://x")
         s = attach(b)
         s.post.side_effect = [fake_resp({"data": {"token": "bench_u"}}),
@@ -253,8 +257,11 @@ class TestSeed:
         assert body["tweets"][0]["content"] == "[t_0000] hi"
         assert body["tweets"][0]["like_count"] == 14
         assert "key" not in body["tweets"][0]   # key is embedded in content
+        # channel noise rides along (reconciliation spec §6.4)
+        assert body["channels"] == [{"key": "ch_00000", "name": "channel 0"},
+                                    {"key": "ch_00001", "name": "channel 1"}]
 
-    def test_jac_seed_omits_author_username(self):
+    def test_jac_seed_omits_author_username_keeps_channels(self):
         b = JacBackend("http://x")
         s = attach(b)
         s.post.return_value = fake_resp({})
@@ -262,6 +269,75 @@ class TestSeed:
         body = s.post.call_args.kwargs["json"]
         assert "author_username" not in body
         assert body["tweets"][0]["like_count"] == 14
+        assert len(body["channels"]) == 2
+
+    def test_seed_returns_seeded_counts(self):
+        b = PostgresBackend("http://x")
+        s = attach(b)
+        s.post.side_effect = [fake_resp({"data": {"token": "bench_u"}}),
+                              fake_resp({"data": {"token": "bench_u"}})]
+        b.ensure_user("bench_u", "pw")
+        s.post.reset_mock()
+        s.post.side_effect = None
+        s.post.return_value = fake_resp({"seeded_tweets": 1, "seeded_channels": 2})
+        out = b.seed(SPEC)
+        assert out["seeded_channels"] == 2
+
+
+class TestSeedChunking:
+    """Jac creates one node+edge per item in a single walker call; a large
+    neighborhood (fixed-target @10% = 1000 tweets + 9000 channels) is chunked to
+    stay under the jac-cloud request timeout (reconciliation spec §15)."""
+
+    def _big_spec(self, n_channels):
+        return {
+            "likers": ["liker_000"],
+            "n_tweets": 10,
+            "n_channels": n_channels,
+            "tweets": [{"key": f"t_{i:04d}", "content": f"[t_{i:04d}] x",
+                        "created_at": "t", "like_count": 0, "likers": [], "comments": []}
+                       for i in range(10)],
+            "channels": [{"key": f"ch_{i:05d}", "name": f"channel {i}"}
+                         for i in range(n_channels)],
+        }
+
+    def test_small_neighborhood_single_call(self):
+        b = JacBackend("http://x")
+        s = attach(b)
+        s.post.return_value = fake_resp({})
+        b.seed(self._big_spec(5))
+        assert s.post.call_count == 1
+
+    def test_large_neighborhood_chunked(self):
+        b = JacBackend("http://x")
+        s = attach(b)
+        s.post.return_value = fake_resp({})
+        # 10 tweets + 6000 channels = 6010 items; chunk size 2500 -> 3 calls
+        out = b.seed(self._big_spec(6000))
+        assert s.post.call_count == 3
+        bodies = [c.kwargs["json"] for c in s.post.call_args_list]
+        # no single call exceeds the chunk budget
+        assert all(len(bd["tweets"]) + len(bd["channels"]) <= JacBackend.SEED_CHUNK_SIZE
+                   for bd in bodies)
+        # every tweet + every channel sent exactly once, counts summed
+        assert sum(len(bd["tweets"]) for bd in bodies) == 10
+        assert sum(len(bd["channels"]) for bd in bodies) == 6000
+        assert out["seeded_channels"] == 6000
+
+
+class TestExtractSeededCounts:
+    def test_top_level(self):
+        assert extract_seeded_counts({"seeded_tweets": 5, "seeded_channels": 3}) == \
+            {"seeded_tweets": 5, "seeded_channels": 3}
+
+    def test_jac_report_envelope(self):
+        body = {"data": {"reports": [{"success": True, "seeded_tweets": 7,
+                                      "seeded_channels": 9}]}}
+        assert extract_seeded_counts(body)["seeded_channels"] == 9
+
+    def test_returns_empty_when_absent(self):
+        assert extract_seeded_counts({"data": {"result": {}}}) == {}
+        assert extract_seeded_counts({}) == {}
 
 
 # ── reset + clear_cache ──────────────────────────────────────────────────────

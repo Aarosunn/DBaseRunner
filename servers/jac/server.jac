@@ -44,6 +44,11 @@ node Tweet {
     # field comparison `like_count > K` (K=10), expressed in the traversal so
     # Filter Pushdown can evaluate it in the storage engine. Kept == len(likes).
     has like_count: int = 0;
+    # Denormalized liker usernames (mirrors `comments` + canonical littleX + the SQL
+    # baselines' inline likes). load_own_tweets reads this directly instead of a
+    # per-tweet reverse Like-edge walk (the N+1). The Like edges are kept too, for
+    # social-graph semantics / Phase 4.5 multi-hop; load just stops walking them.
+    has likes: list[str] = [];
     has comments: list = [];
     has jac_id: str = "";
 }
@@ -261,14 +266,20 @@ walker like_tweet {
             target = existing_liked_tweet[0];
             me del --> target;
             target.like_count -= 1;  # keep denormalized count in sync (R6)
-            report {"liked": False, "likes":[u.username for u in [target<-:Like:<-Profile]]};
+            if username in target.likes {  # keep denormalized liker list in sync
+                target.likes.remove(username);
+            }
+            report {"liked": False, "likes": target.likes};
             disengage;
         }
         target = find_tweet(self.tweet_id);
         if target {
             me +>: Like :+> target;
             target.like_count += 1;  # keep denormalized count in sync (R6)
-            report {"liked": True, "likes":[u.username for u in [target<-:Like:<-Profile]]};
+            if username not in target.likes {  # keep denormalized liker list in sync
+                target.likes.append(username);
+            }
+            report {"liked": True, "likes": target.likes};
             disengage;
         }
         report {"error": "Tweet not found"};
@@ -895,24 +906,31 @@ walker load_own_tweets {
         }
         my_profile = my_profiles[0];
 
-        # server_timing (fair-timing spec §3). Measurement seam only — the
-        # comprehension is UNCHANGED (typed ?:Tweet -> GTI, literal like_count > 10
-        # -> FP). ms_fetch = resolve the typed-neighbor list; ms_build = assemble
-        # the payload (incl. per-tweet liker resolve); server_total = entry -> return.
+        # Type-selectivity reconciliation (spec §4): NO like_count predicate — return
+        # ALL own tweets. The edge MUST stay untyped `-->` (traverses Post AND Member
+        # out-edges); `?:Tweet` discriminates by NODE TYPE via the GTI n:Tweet bucket,
+        # skipping the n:Channel noise. An edge-typed `->:Post:->` would skip channels
+        # for free even with the GTI off and silently defeat the naive-jac line (#10).
+        # Filter-pushdown (#21) is NOT wired here: jaseci only pushes a LITERAL-RHS
+        # predicate, so jac-FP needs a fixed literal + seed-data sweep, not a param
+        # ([[gti-fp-mechanism]], spec §10). ms_fetch = resolve the typed-neighbor list;
+        # ms_build = assemble the payload; server_total = entry -> return.
         t_fetch0 = perf_counter();
-        my_tweets = [my_profile-->(?:Tweet, like_count > 10)];
+        my_tweets = [my_profile-->(?:Tweet)];
         t_fetch1 = perf_counter();
 
         tweet_data: list = [];
         for tweet in my_tweets {
-            likers = [tweet<-:Like:<-(?:Profile)];
+            # Denormalized likers read directly (no per-tweet reverse Like-edge walk
+            # = no N+1; matches the SQL baselines + canonical littleX). The Like edges
+            # still exist for the social graph; this read just doesn't traverse them.
             tweet_data.append({
                 "id": tweet.jac_id,
                 "content": tweet.content,
                 "author_username": tweet.author_username,
                 "created_at": tweet.created_at,
                 "like_count": tweet.like_count,
-                "likes": [p.username for p in likers],
+                "likes": tweet.likes,
                 "comments": tweet.comments
             });
         }
@@ -963,8 +981,11 @@ walker seed_tweets {
     # user's JWT; tweets are created under the caller's Profile via Post edges.
     # likers: the pool of liker usernames (run-agnostic). Each tweet's `likers`
     # list selects names from the pool; Like edges are detached Profile -> Tweet.
+    # channels: type-selectivity noise (spec §6.4) — Channel nodes off the eval
+    # Profile via Member edges; load_own_tweets's GTI n:Tweet lookup skips them.
     has likers: list = [];
     has tweets: list = [];
+    has channels: list = [];
 
     can run with Root entry {
         # Ensure the caller's Profile exists (ensure_user only registers+logs in).
@@ -990,15 +1011,33 @@ walker seed_tweets {
                 author_username=my_profile.username,
                 created_at=tw["created_at"],
                 like_count=tw["like_count"],
+                likes=tw["likers"],
                 comments=tw["comments"]
             );
             new_tweet[0].jac_id = jid(new_tweet[0]);
             grant(new_tweet[0], level=ConnectPerm);
+            # Like edges kept (social graph / Phase 4.5 multi-hop); load_own_tweets
+            # reads the denormalized `likes` field, not these edges.
             for lname in tw["likers"] {
                 liker_nodes[lname] +>:Like:+> new_tweet[0];
             }
         }
-        report {"success": True, "seeded": len(self.tweets)};
+
+        # Channel noise off the eval Profile via Member edges. load_own_tweets's
+        # untyped `-->` + GTI n:Tweet lookup never materializes these (spec §6.4).
+        # Channel has no jac_id field and is never returned, so neither jac_id nor a
+        # cross-root grant is needed — the Member edge from the persistent Profile is
+        # what files it under the root's GTI n:Channel bucket (the noise to skip).
+        for ch in self.channels {
+            my_profile +>:Member():+> Channel(name=ch["name"]);
+        }
+
+        report {
+            "success": True,
+            "seeded": len(self.tweets),
+            "seeded_tweets": len(self.tweets),
+            "seeded_channels": len(self.channels)
+        };
     }
 }
 

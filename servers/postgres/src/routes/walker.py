@@ -491,9 +491,23 @@ def create_channel(
 # ---------------------------------------------------------------------------
 
 @router.post("/load_own_tweets")
-def load_own_tweets(current_user: dict = Depends(get_current_user)):
+def load_own_tweets(body: dict = Body(default={}),
+                    current_user: dict = Depends(get_current_user)):
+    # Type-selectivity reconciliation (spec §4): NO like_count predicate — return
+    # ALL of the caller's own tweets. `threshold` is the filter-pushdown seam
+    # (spec §10): default off; pass {"threshold": k} for the future FP sweep (#21),
+    # where it binds `like_count > %s` and pushes down to the covering index.
     t_entry = time.perf_counter()
-    sql = """
+    threshold = body.get("threshold")
+    predicate = ""
+    params = [current_user["id"]]
+    if threshold is not None:
+        predicate = " AND t.like_count > %s"
+        params.append(threshold)
+    # No tweet-level ORDER BY: jac/neo4j return unordered and the Phase-5 oracle is a
+    # multiset compare, so a tweet sort here would be asymmetric work vs the graph
+    # backends (review fix). Comment-level ORDER BY kept — per-tweet, negligible.
+    sql = f"""
         SELECT COALESCE(json_agg(
             json_build_object(
                 'id', t.id,
@@ -514,15 +528,15 @@ def load_own_tweets(current_user: dict = Depends(get_current_user)):
                     ) ORDER BY c.created_at)
                     FROM comments c WHERE c.tweet_id = t.id
                 ), '[]'::json)
-            ) ORDER BY t.created_at DESC
+            )
         ), '[]'::json) AS tweets
         FROM tweets t
         JOIN users u ON u.id = t.author_id
-        WHERE t.author_id = %s AND t.like_count > 10
+        WHERE t.author_id = %s{predicate}
     """
     t0 = time.perf_counter()
     with db.conn() as c, c.cursor() as cur:
-        cur.execute(sql, (current_user["id"],))
+        cur.execute(sql, tuple(params))
         row = cur.fetchone()
     ms_fetch = (time.perf_counter() - t0) * 1000  # json_agg round-trip (builds payload in-SQL)
     tweets = row["tweets"] or []
@@ -622,10 +636,24 @@ def seed_tweets(body: dict = Body(default={})):
     author_username = body["author_username"]
     tweets = body.get("tweets", [])
     liker_pool = body.get("likers", [])
+    channels = body.get("channels", [])   # type-selectivity noise (spec §6.4)
 
     with db.conn() as c, c.cursor() as cur:
         author_id = _upsert_user(cur, author_username)
         liker_ids = {name: _upsert_user(cur, name) for name in liker_pool}
+
+        # Channel noise: TPT keeps it in its own table, so load_own_tweets never
+        # touches it — the optimized backend pre-separates the type (spec §4).
+        for ch in channels:
+            channel_id = cur.execute(
+                "INSERT INTO channels (name) VALUES (%s) RETURNING id",
+                (ch.get("name", ch.get("key", "")),),
+            ).fetchone()["id"]
+            cur.execute(
+                "INSERT INTO channel_members (user_id, channel_id) VALUES (%s, %s) "
+                "ON CONFLICT DO NOTHING",
+                (author_id, channel_id),
+            )
 
         for tw in tweets:
             tweet_id = cur.execute(
@@ -655,7 +683,9 @@ def seed_tweets(body: dict = Body(default={})):
                     comments,
                 )
 
-    return singleton_response({"success": True, "seeded": len(tweets)})
+    return singleton_response({"success": True, "seeded": len(tweets),
+                               "seeded_tweets": len(tweets),
+                               "seeded_channels": len(channels)})
 
 
 # ---------------------------------------------------------------------------
