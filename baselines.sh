@@ -88,11 +88,21 @@ wait_for_port() {
 # accepts requests (FastAPI won't serve until lifespan startup completes, which here
 # blocks on the DB becoming reachable + schema bootstrap; neo4j adds JVM cold-boot).
 # So gate on an actual HTTP 200 from /health, not just the open port.
+#
+# HEALTH_RETRIES is a wall-clock SECONDS budget. Each curl is capped at 5s
+# (--max-time): while the app is startup-blocked its socket is OPEN but unresponsive,
+# so an un-capped curl would HANG on one request (looks like a frozen [3.5/5]) instead
+# of polling. With -m 5 we poll, and emit a heartbeat every ~15s so a slow cold start
+# (a fresh DB running initdb / a cold JVM, ~60-120s) visibly shows progress.
 wait_for_health() {
-  local port="$1" i code
-  for ((i=0; i<HEALTH_RETRIES; i++)); do
-    code="$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:${port}/health" 2>/dev/null || true)"
+  local port="$1" code last_beat=0 start=$SECONDS
+  while (( SECONDS - start < HEALTH_RETRIES )); do
+    code="$(curl -s -m 5 -o /dev/null -w '%{http_code}' "http://127.0.0.1:${port}/health" 2>/dev/null || true)"
     [[ "$code" == "200" ]] && return 0
+    if (( SECONDS - last_beat >= 15 )); then
+      echo "      /health not ready: $((SECONDS - start))s/${HEALTH_RETRIES}s, last=${code:-000} (cold DB init ~60-120s)" >&2
+      last_beat=$SECONDS
+    fi
     sleep 1
   done
   return 1
