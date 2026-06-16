@@ -137,7 +137,7 @@ def _series_key(row):
 
 def aggregate(rows):
     buckets = defaultdict(lambda: defaultdict(lambda: defaultdict(
-        lambda: {"lat": [], "bytes": []})))
+        lambda: {"lat": [], "server": [], "bytes": []})))
     for r in rows:
         if str(r.get("warmup")) != "0":
             continue
@@ -147,6 +147,11 @@ def aggregate(rows):
         cell = buckets[sweep][backend][param]
         cell["lat"].append(float(r["latency_ms"]))
         cell["bytes"].append(int(r["response_bytes"]))
+        # server_total_ms = the substrate (handler entry->return), the fair
+        # cross-backend number; blank when a backend emits no server_timing.
+        st = r.get("server_total_ms")
+        if st not in (None, "", "None"):
+            cell["server"].append(float(st))
 
     out = {}
     for sweep, by_backend in buckets.items():
@@ -155,23 +160,40 @@ def aggregate(rows):
             points = []
             for param in sorted(by_param):
                 lat = by_param[param]["lat"]
+                srv = by_param[param]["server"]
                 byts = by_param[param]["bytes"]
                 med, p25, p75 = _percentiles(lat)
-                points.append({
+                point = {
                     "param": param,
                     "median_ms": med,
                     "p25": p25,
                     "p75": p75,
                     "median_bytes": statistics.median(byts),
-                })
+                }
+                if srv:
+                    s_med, s_p25, s_p75 = _percentiles(srv)
+                    point["median_server_ms"] = s_med
+                    point["server_p25"] = s_p25
+                    point["server_p75"] = s_p75
+                points.append(point)
             out[sweep][backend] = points
     return out
 
 
-def _plot_latency(agg, sweep, figures_dir, fname, params=None):
+def _has_metric(agg, sweep, key):
+    """True if any plotted point in this sweep carries `key` (e.g. server timing)."""
+    return any(key in p for series in agg[sweep].values() for p in series)
+
+
+def _plot_latency(agg, sweep, figures_dir, fname, params=None, *,
+                  value_keys=("median_ms", "p25", "p75"),
+                  ylabel="End-to-end latency (milliseconds)",
+                  caption_override=None):
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
+
+    med_key, lo_key, hi_key = value_keys
 
     fig, ax = plt.subplots(figsize=(7.5, 5.0))
     fig.patch.set_facecolor("white")
@@ -183,18 +205,21 @@ def _plot_latency(agg, sweep, figures_dir, fname, params=None):
     ordered = [b for b in order if b in backends_present] + \
               [b for b in backends_present if b not in order]
 
+    all_x = set()
     for backend in ordered:
-        pts = agg[sweep][backend]
+        pts = [p for p in agg[sweep][backend] if med_key in p]
+        if not pts:
+            continue
         style = _BACKEND_STYLE.get(backend, _DEFAULT_STYLE)
         xs = [p["param"] for p in pts]
-        ys = [p["median_ms"] for p in pts]
-        yerr_lo = [p["median_ms"] - p["p25"] for p in pts]
-        yerr_hi = [p["p75"] - p["median_ms"] for p in pts]
-        label = style["label"] or backend
+        ys = [p[med_key] for p in pts]
+        yerr_lo = [p[med_key] - p[lo_key] for p in pts]
+        yerr_hi = [p[hi_key] - p[med_key] for p in pts]
+        all_x.update(xs)
         ax.errorbar(
             xs, ys,
             yerr=[yerr_lo, yerr_hi],
-            label=label,
+            label=style["label"] or backend,
             color=style["color"],
             marker=style["marker"],
             markersize=7,
@@ -203,15 +228,19 @@ def _plot_latency(agg, sweep, figures_dir, fname, params=None):
             capthick=1.2,
         )
 
-    ax.set_yscale("log")
+    # Linear axes + plain (non-scientific) ticks -> spacing is proportional to value.
+    ax.set_ylim(bottom=0)
+    if all_x:
+        ax.set_xticks(sorted(all_x))
+    ax.ticklabel_format(axis="both", style="plain")
     ax.set_xlabel(_axis_label(sweep), fontsize=12)
-    ax.set_ylabel("median latency (ms, log)", fontsize=12)
+    ax.set_ylabel(ylabel, fontsize=12)
     ax.set_title(_title(sweep), fontsize=13, fontweight="normal")
     ax.legend(loc="upper left", fontsize=10, framealpha=0.9)
-    ax.grid(True, which="both", color="#cccccc", linewidth=0.6, linestyle="-")
+    ax.grid(True, color="#cccccc", linewidth=0.6, linestyle="-")
     ax.set_axisbelow(True)
 
-    caption = _caption(sweep, params)
+    caption = caption_override if caption_override is not None else _caption(sweep, params)
     if caption:
         fig.text(0.5, 0.01, caption, ha="center", va="bottom",
                  fontsize=7.5, style="italic", color="#555555")
@@ -237,20 +266,26 @@ def _plot_bytes(agg, sweep, figures_dir, fname):
     ordered = [b for b in order if b in backends_present] + \
               [b for b in backends_present if b not in order]
 
+    all_x = set()
     for backend in ordered:
         pts = agg[sweep][backend]
         style = _BACKEND_STYLE.get(backend, _DEFAULT_STYLE)
         xs = [p["param"] for p in pts]
-        ys = [p["median_bytes"] for p in pts]
+        ys = [p["median_bytes"] / 1000.0 for p in pts]  # bytes -> kilobytes (plain units)
+        all_x.update(xs)
         ax.plot(xs, ys, label=style["label"] or backend,
                 color=style["color"], marker=style["marker"],
                 markersize=7, linewidth=2)
 
+    ax.set_ylim(bottom=0)
+    if all_x:
+        ax.set_xticks(sorted(all_x))
+    ax.ticklabel_format(axis="both", style="plain")
     ax.set_xlabel(_axis_label(sweep), fontsize=12)
-    ax.set_ylabel("median response bytes", fontsize=12)
-    ax.set_title(f"{_title(sweep)} — payload sanity", fontsize=12)
+    ax.set_ylabel("Response size (kilobytes)", fontsize=12)
+    ax.set_title(f"{_title(sweep)} — payload size (sanity check)", fontsize=12)
     ax.legend(loc="upper left", fontsize=10, framealpha=0.9)
-    ax.grid(True, which="both", color="#cccccc", linewidth=0.6)
+    ax.grid(True, color="#cccccc", linewidth=0.6)
     ax.set_axisbelow(True)
 
     fig.tight_layout()
@@ -333,7 +368,18 @@ def render(agg, figures_dir, params=None):
     }
     for sweep in agg:
         base = fig_name.get(sweep, sweep)
+        # End-to-end client latency (includes the jac-cloud envelope + transport).
         written.append(_plot_latency(agg, sweep, figures_dir, f"{base}.png", params))
+        # Server-only substrate (handler entry->return) — the fair cross-backend
+        # number; emitted whenever a backend reported server_timing.
+        if _has_metric(agg, sweep, "median_server_ms"):
+            written.append(_plot_latency(
+                agg, sweep, figures_dir, f"{base}_server.png", params,
+                value_keys=("median_server_ms", "server_p25", "server_p75"),
+                ylabel="Server time — handler only (milliseconds)",
+                caption_override=("Server substrate only (handler entry to return); "
+                                  "excludes transport + framework envelope. "
+                                  "The fair cross-backend number.")))
         written.append(_plot_bytes(agg, sweep, figures_dir, f"{base}_bytes.png"))
 
     # Confound overlay when both type-selectivity modes are present (spec §5.3).
