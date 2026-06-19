@@ -16,5 +16,5 @@ scikit-learn = "~=1.8"
 topology_index = true
 
 [plugins.scale.kubernetes]
-jaseci_repo_url = "https://github.com/cse584-W26/jaseci.git"
-jaseci_branch = "filter_pushdown"
+jaseci_repo_url = "https://github.com/Aarosunn/jaseci.git"
+jaseci_branch = "main"

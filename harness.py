@@ -298,7 +298,7 @@ def write_run_metadata(out_dir, args, *, started_at, finished_at, harness_git_sh
     version to each figure."""
     meta = {
         "run_id": args.run_id,
-        "backend": args.backend,
+        "backend": args.label,
         "harness_git_sha": harness_git_sha,
         "seed_spec_version": seed_gen.SPEC_VERSION,
         "likes_threshold": seed_gen.LIKES_THRESHOLD,
@@ -311,7 +311,7 @@ def write_run_metadata(out_dir, args, *, started_at, finished_at, harness_git_sh
         "finished_at": finished_at,
         "notes": {"jac_topology_index": "from k8s env JAC_TOPOLOGY_INDEX, record actual value"},
     }
-    (Path(out_dir) / f"{args.backend}_meta.json").write_text(json.dumps(meta, indent=2))
+    (Path(out_dir) / f"{args.label}_meta.json").write_text(json.dumps(meta, indent=2))
 
 
 def _build_parser():
@@ -320,6 +320,10 @@ def _build_parser():
                    choices=["jac", "postgres", "sqlalchemy", "neo4j"],
                    help="Backend to benchmark")
     p.add_argument("--url", required=True, help="Base URL of the backend service")
+    p.add_argument("--label", default=None,
+                   help="CSV/figure label for this run (default: --backend). Distinguishes "
+                        "multiple runs of the SAME backend — e.g. jac ablations "
+                        "jac_nogti / jac_noredis / jac_noredis_cold.")
     p.add_argument("--user", default="bench@example.com",
                    help="Registration email/username source for eval users")
     p.add_argument("--password", default="benchpass", help="Eval-user password")
@@ -360,6 +364,8 @@ def main(argv=None):
     started_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     if args.run_id is None:
         args.run_id = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
+    if args.label is None:
+        args.label = args.backend
 
     # Fail fast on an unsupported sweep BEFORE constructing anything.
     for sweep_type in args.sweep:
@@ -386,7 +392,7 @@ def main(argv=None):
     load_url = f"{args.url.rstrip('/')}/walker/load_own_tweets"
     out_dir = Path(args.out)
     out_dir.mkdir(parents=True, exist_ok=True)
-    out_path = out_dir / f"{args.backend}.csv"
+    out_path = out_dir / f"{args.label}.csv"
 
     with open(out_path, "w", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=CSV_FIELDNAMES)
@@ -416,7 +422,7 @@ def main(argv=None):
                 return timed_call(backend.session, load_url, {})
 
             run_sweep(
-                args.backend, sweep_type, param_values,
+                args.label, sweep_type, param_values,
                 timed_fn, writer,
                 warmup_count=args.warmup,
                 trials=args.trials,

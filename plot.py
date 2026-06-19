@@ -21,6 +21,10 @@ _SKIP = {"correctness.csv"}
 # Display names, colors, markers matching the paper's figure style.
 _BACKEND_STYLE = {
     "jac":        {"label": "Jac GTI+FP",    "color": "#2ca02c", "marker": "o"},
+    # jac ablation lines (same backend, different deploy/flag — see harness --label)
+    "jac_nogti":        {"label": "Jac no-GTI",   "color": "#98df8a", "marker": "v"},
+    "jac_noredis":      {"label": "Jac no-Redis", "color": "#ff7f0e", "marker": "P"},
+    "jac_noredis_cold": {"label": "Jac no-cache", "color": "#8c564b", "marker": "X"},
     "postgres":   {"label": "PG hand-tuned",  "color": "#1f77b4", "marker": "s"},
     "sqlalchemy": {"label": "SQLAlchemy",     "color": "#9467bd", "marker": "D"},
     "neo4j":      {"label": "Neo4j",          "color": "#d62728", "marker": "^"},
@@ -199,8 +203,9 @@ def _plot_latency(agg, sweep, figures_dir, fname, params=None, *,
     fig.patch.set_facecolor("white")
     ax.set_facecolor("white")
 
-    # draw backends in a consistent order (jac first if present, then pg, sqla, neo4j)
-    order = ["jac", "postgres", "sqlalchemy", "neo4j"]
+    # draw backends in a consistent order (jac + its ablations first, then pg, sqla, neo4j)
+    order = ["jac", "jac_nogti", "jac_noredis", "jac_noredis_cold",
+             "postgres", "sqlalchemy", "neo4j"]
     backends_present = list(agg[sweep].keys())
     ordered = [b for b in order if b in backends_present] + \
               [b for b in backends_present if b not in order]
