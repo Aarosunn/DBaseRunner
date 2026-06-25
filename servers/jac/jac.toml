@@ -17,4 +17,4 @@ topology_index = true
 
 [plugins.scale.kubernetes]
 jaseci_repo_url = "https://github.com/Aarosunn/jaseci.git"
-jaseci_branch = "main"
+jaseci_branch = "fp-dirtyfix"

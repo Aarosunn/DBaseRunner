@@ -30,12 +30,15 @@ adds **what changed** and **what to confirm**.
 
 - **`servers/jac/jac.toml`** repointed the deployed jaseci source:
   - was: `cse584-W26/jaseci @ filter_pushdown`
-  - now: **`https://github.com/Aarosunn/jaseci.git @ main`**
+  - now: **`https://github.com/Aarosunn/jaseci.git @ fp-dirtyfix`**
   - **Why:** `filter_pushdown` had a broken `ScaleTieredMemory.commit` that re-flushed **every**
     L1 anchor (including read-only ones) at request close → ~7s client latency ("writes-on-read").
-    `Aarosunn/jaseci@main` fixes it: commit uses `l3.sync()` + a **hash dirty-check**
-    (`_compute_hash(a) != a.hash`) so only mutated anchors are written. `main` also has GTI
-    (`topology_index.jac`). We are NOT testing Filter Pushdown yet, so we don't need the FP branch.
+    `fp-dirtyfix` = filter_pushdown + a backported **hash dirty-check**: `_compute_hash` added to
+    the serializer, `anchor.hash` set at deserialize, and the commit flush now skips anchors whose
+    recomputed hash is unchanged (read-only → skipped; mutated/new → flushed). GTI is present
+    (`topology_index.jac`); FP code is dormant (no predicate in the query). **NB: we did NOT use
+    `Aarosunn/jaseci@main` — its `jac-scale` was repackaged to `jac.toml` (no `pyproject.toml`), so
+    the deploy's `pip install ./jac-scale` can't build it (that was the A4 CrashLoop).**
 - **`harness.py`** new `--label` flag (defaults to `--backend`). Lets you run the SAME backend
   under several configs and tag each run's CSV/figure distinctly (for the 4 jac ablation lines).
   `--backend` still selects the class + the jac-only `--cold-l1` path.
@@ -73,10 +76,12 @@ honest "GTI-vs-SQL with all caching stripped" number.
   CSV, compare `latency_ms` (client) vs `server_total_ms`. **PASS = `latency_ms` is NOT ~7000ms**
   (should be within a small multiple of `server_total_ms` + network, not seconds). On the old
   `filter_pushdown` branch this was ~7s; it should now be ~tens of ms.
-- **A4 — No other deploy breakage.** `main` evolved past `filter_pushdown`. **PASS = deploy
-  reaches Ready, `/docs` returns 200, auth + seed + load all work.** If it breaks, capture
-  `kubectl logs -l app=jaseci` and FALL BACK to `jaseci_repo_url=https://github.com/cse584-W26/jaseci.git`,
-  `jaseci_branch=main` (same fix, different host) and retry.
+- **A4 — No other deploy breakage.** `fp-dirtyfix` = filter_pushdown + 3-file dirty-check patch,
+  so it should build like filter_pushdown always did. **PASS = deploy reaches Ready, `/docs`
+  returns 200, auth + seed + load all work.** If it breaks, capture `kubectl logs -l app=jaseci`
+  and FALL BACK to the known-good **`jaseci_repo_url=https://github.com/cse584-W26/jaseci.git`,
+  `jaseci_branch=filter_pushdown`** (builds fine, but WITHOUT the fix → ~7s `latency_ms`; that's
+  client-side only, so `server_total` and the ablation are still valid — just note it).
 
 ### B. The ablation knobs
 - **B5 — GTI-off deploy (#2).** Two routes, try the env first:
